@@ -24,16 +24,26 @@ def get_trending_product():
     response = requests.get(url, headers=headers)
     soup = BeautifulSoup(response.content, "html.parser")
 
-    first_product = soup.select_one(".zg-item .p13n-sc-uncoverable-faceout")
-    if not first_product:
-        raise Exception("Failed to find trending product")
+    # More stable selector for grid items
+    product_blocks = soup.select(".zg-grid-general-faceout")
+    if not product_blocks:
+        raise Exception("No trending product blocks found on the page.")
 
-    title = first_product.select_one(".p13n-sc-truncate, ._cDEzb_p13n-sc-css-line-clamp-1").get_text(strip=True)
-    raw_link = first_product.select_one("a")['href']
+    first_product = product_blocks[0]
+
+    title_tag = first_product.select_one(".p13n-sc-truncate, ._cDEzb_p13n-sc-css-line-clamp-1")
+    link_tag = first_product.select_one("a")
+    img_tag = first_product.select_one("img")
+
+    if not (title_tag and link_tag and img_tag):
+        raise Exception("Incomplete product data in HTML.")
+
+    title = title_tag.get_text(strip=True)
+    raw_link = link_tag['href']
     asin = raw_link.split("/dp/")[1].split("/")[0] if "/dp/" in raw_link else None
     tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
     link = f"https://www.amazon.com/dp/{asin}?tag={tag}" if asin else "https://www.amazon.com" + raw_link
-    img = first_product.select_one("img")['src']
+    img = img_tag['src']
 
     return title, link, img
 
