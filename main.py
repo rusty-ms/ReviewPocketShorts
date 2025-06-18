@@ -10,6 +10,7 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import pickle
+import json
 
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -28,7 +29,10 @@ def get_trending_product():
         raise Exception("Failed to find trending product")
 
     title = first_product.select_one(".p13n-sc-truncate, ._cDEzb_p13n-sc-css-line-clamp-1").get_text(strip=True)
-    link = "https://www.amazon.com" + first_product.select_one("a")['href']
+    raw_link = first_product.select_one("a")['href']
+    asin = raw_link.split("/dp/")[1].split("/")[0] if "/dp/" in raw_link else None
+    tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
+    link = f"https://www.amazon.com/dp/{asin}?tag={tag}" if asin else "https://www.amazon.com" + raw_link
     img = first_product.select_one("img")['src']
 
     return title, link, img
@@ -54,6 +58,15 @@ def create_video(image_url, audio_path, output_path, caption):
 
 def authenticate_youtube():
     creds = None
+
+    # Write credentials JSON from environment variable to file
+    credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_json:
+        raise Exception("GOOGLE_APPLICATION_CREDENTIALS not set in environment variables")
+
+    with open("client_secrets.json", "w") as f:
+        f.write(credentials_json)
+
     if os.path.exists("token.pickle"):
         with open("token.pickle", "rb") as token:
             creds = pickle.load(token)
@@ -95,9 +108,11 @@ def upload_video_to_youtube(file_path, title, description):
 
 def main():
     title, link, img = get_trending_product()
-    short_desc = f"Check out this trending product on Amazon: {title}. It has great reviews!"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    short_desc = f"\U0001F525 Trending on Amazon: {title}!"  # Fire emoji
+    call_to_action = f"\n\n👉 Check it out here: {link}"
+    full_description = short_desc + call_to_action
 
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     audio_file = f"{OUTPUT_DIR}/audio_{timestamp}.mp3"
     video_file = f"{OUTPUT_DIR}/video_{timestamp}.mp4"
     desc_file = f"{OUTPUT_DIR}/description_{timestamp}.txt"
@@ -106,9 +121,9 @@ def main():
     create_video(img, audio_file, video_file, title)
 
     with open(desc_file, "w") as f:
-        f.write(f"{short_desc}\nAffiliate link: {link}")
+        f.write(full_description)
 
-    upload_video_to_youtube(video_file, title, f"{short_desc}\nAffiliate link: {link}")
+    upload_video_to_youtube(video_file, title, full_description)
 
 
 if __name__ == "__main__":
