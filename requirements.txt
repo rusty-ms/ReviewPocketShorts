@@ -1,8 +1,8 @@
+requests
+beautifulsoup4
+TTS
+moviepy
+google-api-python-client
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
-google-api-python-client
-moviepy
-TTS
-requests
-beautifulsoup4
