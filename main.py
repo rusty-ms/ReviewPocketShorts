@@ -11,6 +11,9 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import pickle
 import json
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -21,19 +24,40 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 def get_trending_product():
     url = "https://www.amazon.com/Best-Sellers/zgbs"
     headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
 
-    # More stable selector for grid items
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.content, "html.parser")
+        product_blocks = soup.select(".zg-grid-general-faceout")
+        if product_blocks:
+            return extract_product_data(product_blocks[0])
+    except Exception as e:
+        print(f"Requests failed: {e}")
+
+    print("Falling back to Selenium...")
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
+    driver.get(url)
+    html = driver.page_source
+    driver.quit()
+    
+    soup = BeautifulSoup(html, "html.parser")
     product_blocks = soup.select(".zg-grid-general-faceout")
     if not product_blocks:
-        raise Exception("No trending product blocks found on the page.")
+        with open("output/amazon_debug.html", "w") as f:
+            f.write(html)
+        raise Exception("No trending product blocks found with requests or selenium.")
 
-    first_product = product_blocks[0]
+    return extract_product_data(product_blocks[0])
 
-    title_tag = first_product.select_one(".p13n-sc-truncate, ._cDEzb_p13n-sc-css-line-clamp-1")
-    link_tag = first_product.select_one("a")
-    img_tag = first_product.select_one("img")
+
+def extract_product_data(product):
+    title_tag = product.select_one(".p13n-sc-truncate, ._cDEzb_p13n-sc-css-line-clamp-1")
+    link_tag = product.select_one("a")
+    img_tag = product.select_one("img")
 
     if not (title_tag and link_tag and img_tag):
         raise Exception("Incomplete product data in HTML.")
@@ -44,7 +68,6 @@ def get_trending_product():
     tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
     link = f"https://www.amazon.com/dp/{asin}?tag={tag}" if asin else "https://www.amazon.com" + raw_link
     img = img_tag['src']
-
     return title, link, img
 
 
@@ -69,7 +92,6 @@ def create_video(image_url, audio_path, output_path, caption):
 def authenticate_youtube():
     creds = None
 
-    # Write credentials JSON from environment variable to file
     credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if not credentials_json:
         raise Exception("GOOGLE_APPLICATION_CREDENTIALS not set in environment variables")
@@ -118,7 +140,7 @@ def upload_video_to_youtube(file_path, title, description):
 
 def main():
     title, link, img = get_trending_product()
-    short_desc = f"\U0001F525 Trending on Amazon: {title}!"  # Fire emoji
+    short_desc = f"\U0001F525 Trending on Amazon: {title}!"
     call_to_action = f"\n\n👉 Check it out here: {link}"
     full_description = short_desc + call_to_action
 
