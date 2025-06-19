@@ -162,6 +162,7 @@ def main():
     short_desc = f"🔥 Trending on Amazon: {title}!"
     call_to_action = f"
 
+
 👉 Check it out here: {link}"
     full_description = short_desc + call_to_action
 
