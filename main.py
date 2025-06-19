@@ -23,15 +23,54 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 
 def get_trending_product():
-    url = "https://www.amazon.com/Best-Sellers/zgbs"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
 
+    url = "https://www.amazon.com/Best-Sellers/zgbs"
+    print("Launching headless Chrome to scrape Amazon best sellers...")
+
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+
+    driver.get(url)
     try:
-        response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.content, "html.parser")
-        product_blocks = soup.select(".zg-grid-general-faceout, .zg-item-immersion, .zg-grid-general-faceout .p13n-sc-uncoverable-faceout")
-        if product_blocks:
-            return extract_product_data(product_blocks[0])
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-asin] img"))
+        )
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+    except Exception as e:
+        print(f"Timeout or error waiting for content: {e}")
+        html = driver.page_source
+        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"Saved fallback HTML to {debug_path}")
+        raise Exception("Amazon page did not load correctly.")
+    finally:
+        driver.quit()
+
+    product = soup.select_one("div[data-asin][data-asin!='']")
+    if not product:
+        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(str(soup))
+        print(f"Saved debug HTML to {debug_path}")
+        raise Exception("No valid product found on Amazon best sellers page.")
+
+    title_tag = product.select_one("img")
+    img_tag = product.select_one("img")
+    asin = product["data-asin"]
+    tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
+    title = title_tag.get("alt") if title_tag else "Unknown Product"
+    link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
+    img = img_tag.get("src") if img_tag else ""
+
+    return title, link, img
     except Exception as e:
         print(f"Requests failed: {e}")
 
