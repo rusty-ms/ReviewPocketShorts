@@ -97,4 +97,88 @@ def create_video(image_url, audio_path, output_path, caption):
     video = CompositeVideoClip([img.set_audio(audio), txt])
     print(f"Writing video to: {output_path}")
     video.write_videofile(output_path, fps=24)
-    print("Video creation complete.")
+    print("Video creation complete.
+
+
+def generate_voiceover(text, filename):
+    print(f"Generating voiceover for: {text}")
+    tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC")
+    tts.tts_to_file(text=text, file_path=filename)
+    print(f"Voiceover saved to: {filename}")
+
+
+def authenticate_youtube():
+    creds = None
+    credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credentials_json:
+        raise Exception("GOOGLE_APPLICATION_CREDENTIALS not set in environment variables")
+
+    with open("client_secrets.json", "w") as f:
+        f.write(credentials_json)
+
+    if os.path.exists("token.pickle"):
+        with open("token.pickle", "rb") as token:
+            creds = pickle.load(token)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES)
+            creds = flow.run_console()
+        with open("token.pickle", "wb") as token:
+            pickle.dump(creds, token)
+
+    return build("youtube", "v3", credentials=creds)
+
+
+def upload_video_to_youtube(file_path, title, description):
+    print(f"Uploading {file_path} to YouTube...")
+    youtube = authenticate_youtube()
+    request_body = {
+        "snippet": {
+            "categoryId": "22",
+            "title": title,
+            "description": description,
+            "tags": ["amazon", "review", "product"]
+        },
+        "status": {
+            "privacyStatus": "public",
+            "selfDeclaredMadeForKids": False
+        }
+    }
+
+    mediaFile = MediaFileUpload(file_path)
+    youtube.videos().insert(
+        part="snippet,status",
+        body=request_body,
+        media_body=mediaFile
+    ).execute()
+    print("Upload complete.")
+
+
+def main():
+    title, link, img = get_trending_product()
+    short_desc = f"🔥 Trending on Amazon: {title}!"
+    call_to_action = f"
+
+👉 Check it out here: {link}"
+    full_description = short_desc + call_to_action
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    audio_file = f"{OUTPUT_DIR}/audio_{timestamp}.mp3"
+    video_file = f"{OUTPUT_DIR}/video_{timestamp}.mp4"
+    desc_file = f"{OUTPUT_DIR}/description_{timestamp}.txt"
+
+    generate_voiceover(short_desc, audio_file)
+    create_video(img, audio_file, video_file, title)
+
+    with open(desc_file, "w") as f:
+        f.write(full_description)
+    print(f"Description saved to: {desc_file}")
+
+    upload_video_to_youtube(video_file, title, full_description)
+
+
+if __name__ == "__main__":
+    main()")
