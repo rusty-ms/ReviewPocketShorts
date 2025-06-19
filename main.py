@@ -1,6 +1,7 @@
 # main.py
 import os
-os.environ["IMAGEMAGICK_BINARY"] = ""
+if os.getenv('GITHUB_ACTIONS'):
+    os.environ["IMAGEMAGICK_BINARY"] = ""
 import os
 import requests
 from bs4 import BeautifulSoup
