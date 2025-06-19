@@ -99,17 +99,20 @@ def get_trending_product():
 
     raise Exception("No new products found.")
 
-
 def create_video(image_url, audio_path, output_path, caption):
     try:
         print(f"Downloading image from: {image_url}")
         response = requests.get(image_url)
-    if response.status_code != 200:
-        raise Exception(f"Failed to download image: {image_url}")
+        if response.status_code != 200:
+            raise Exception(f"Failed to download image: {image_url}")
+
+        with open("temp.jpg", "wb") as f:
+            f.write(response.content)
+
     except Exception as e:
         print(f"An error occurred: {e}")
-    with open("temp.jpg", "wb") as f:
-        f.write(response.content)
+        raise
+
 
     print("Image saved as temp.jpg")
     print(f"Loading audio from: {audio_path}")
