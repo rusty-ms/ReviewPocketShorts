@@ -34,13 +34,14 @@ def get_trending_product():
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
 
     driver.get(url)
     try:
         WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-asin] img"))
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-asin][data-asin!=''] img"))
         )
         soup = BeautifulSoup(driver.page_source, "html.parser")
     except Exception as e:
@@ -54,26 +55,38 @@ def get_trending_product():
     finally:
         driver.quit()
 
-    product = soup.select_one("div[data-asin][data-asin!='']")
-    if not product:
-        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
-        with open(debug_path, "w", encoding="utf-8") as f:
-            f.write(str(soup))
-        print(f"Saved debug HTML to {debug_path}")
-        raise Exception("No valid product found on Amazon best sellers page.")
+    seen_asins_path = os.path.join(OUTPUT_DIR, "seen_asins.txt")
+    if os.path.exists(seen_asins_path):
+        with open(seen_asins_path, "r") as f:
+            seen_asins = set(line.strip() for line in f)
+    else:
+        seen_asins = set()
 
-    title_tag = product.select_one("img")
-    img_tag = product.select_one("img")
-    asin = product["data-asin"]
-    tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
-    title = title_tag.get("alt") if title_tag else "Unknown Product"
-    link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
-    img = img_tag.get("src") if img_tag else ""
+    products = soup.select("div[data-asin][data-asin!='']")
+    for product in products:
+        asin = product["data-asin"].strip()
+        if asin in seen_asins:
+            continue  # skip duplicates
 
-    print(f"Product Title: {title}")
-    print(f"Product Link: {link}")
-    print(f"Image URL: {img}")
-    return title, link, img
+        img_tag = product.select_one("img")
+        if not img_tag:
+            continue
+        title = img_tag.get("alt", "Unknown Product").strip()
+        img = img_tag.get("src", "")
+        tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
+        link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
+
+        # Save this ASIN to prevent reuse
+        with open(seen_asins_path, "a") as f:
+            f.write(asin + "
+")
+
+        print(f"Product Title: {title}")
+        print(f"Product Link: {link}")
+        print(f"Image URL: {img}")
+        return title, link, img
+
+    raise Exception("No new products found.")
 
 
 def create_video(image_url, audio_path, output_path, caption):
@@ -91,12 +104,8 @@ def create_video(image_url, audio_path, output_path, caption):
 
     print("Composing video...")
     img = ImageClip("temp.jpg").set_duration(audio.duration).resize(height=1920).set_position("center")
-    #txt = TextClip(caption, fontsize=60, color='white', method='caption', size=(1080, 200))
-    txt = (
-        TextClip(caption, fontsize=60, color='white', method='label')
-        .set_position(('center', 'bottom'))
-        .set_duration(audio.duration)
-    )
+    txt = TextClip(caption, fontsize=60, color='white', method='caption', size=(1080, 200))\
+        .set_position(('center', 'bottom')).set_duration(audio.duration)
 
     video = CompositeVideoClip([img.set_audio(audio), txt])
     print(f"Writing video to: {output_path}")
@@ -164,7 +173,9 @@ def upload_video_to_youtube(file_path, title, description):
 def main():
     title, link, img = get_trending_product()
     short_desc = f"🔥 Trending on Amazon: {title}!"
-    call_to_action = f"👉 Check it out here: {link}"
+    call_to_action = f"
+
+👉 Check it out here: {link}"
     full_description = short_desc + call_to_action
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
