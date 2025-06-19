@@ -27,7 +27,8 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install "Pillow==9.5.0"
-          pip install requests beautifulsoup4 TTS moviepy==1.0.3 \
+          pip install git+https://github.com/Zulko/moviepy.git@v2.0.0.dev2
+          pip install requests beautifulsoup4 TTS \
                       selenium webdriver-manager \
                       google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
 
