@@ -29,7 +29,7 @@ def get_trending_product():
     try:
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.content, "html.parser")
-        product_blocks = soup.select(".zg-grid-general-faceout")
+        product_blocks = soup.select(".zg-grid-general-faceout, .zg-item-immersion, .zg-grid-general-faceout .p13n-sc-uncoverable-faceout")
         if product_blocks:
             return extract_product_data(product_blocks[0])
     except Exception as e:
@@ -49,8 +49,10 @@ def get_trending_product():
     soup = BeautifulSoup(html, "html.parser")
     product_blocks = soup.select(".zg-grid-general-faceout")
     if not product_blocks:
-        with open("output/amazon_debug.html", "w") as f:
+        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
+        with open(debug_path, "w", encoding="utf-8") as f:
             f.write(html)
+        print(f"No products found. Saved debug HTML to {debug_path}")
         raise Exception("No trending product blocks found with requests or selenium.")
 
     return extract_product_data(product_blocks[0])
