@@ -108,8 +108,7 @@ def create_video(image_url, audio_path, output_path, caption):
     print("Image saved as temp.jpg")
     print(f"Loading audio from: {audio_path}")
     audio = AudioFileClip(audio_path)
-
-      print("Composing video...")
+    print("Composing video...")
     img = ImageClip("temp.jpg").set_duration(audio.duration).resize(height=1920).set_position("center")
     txt = TextClip(caption, fontsize=60, color='white', method='label').set_position(('center', 'bottom')).set_duration(audio.duration)
 
