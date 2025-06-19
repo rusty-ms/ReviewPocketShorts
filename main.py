@@ -160,7 +160,7 @@ def upload_video_to_youtube(file_path, title, description):
 def main():
     title, link, img = get_trending_product()
     short_desc = f"🔥 Trending on Amazon: {title}!"
-    call_to_action = f"
+    call_to_action = f
 
 
 👉 Check it out here: {link}"
