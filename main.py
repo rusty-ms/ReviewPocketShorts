@@ -99,20 +99,16 @@ def get_trending_product():
 
     raise Exception("No new products found.")
 
+
 def create_video(image_url, audio_path, output_path, caption):
     try:
         print(f"Downloading image from: {image_url}")
-        response = requests.get(image_url)
-        if response.status_code != 200:
-            raise Exception(f"Failed to download image: {image_url}")
+    response = requests.get(image_url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to download image: {image_url}")
 
-        with open("temp.jpg", "wb") as f:
-            f.write(response.content)
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        raise
-
+    with open("temp.jpg", "wb") as f:
+        f.write(response.content)
 
     print("Image saved as temp.jpg")
     print(f"Loading audio from: {audio_path}")
@@ -123,8 +119,8 @@ def create_video(image_url, audio_path, output_path, caption):
     txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
 
     video = CompositeVideoClip([img.set_audio(audio), txt])
-            print(f"Writing video to: {output_path}")
-        video.write_videofile(output_path, fps=24)
+                    print(f"Writing video to: {output_path}")
+                video.write_videofile(output_path, fps=24)
     except Exception as e:
         print(f"Video creation failed: {e}")
         raise
