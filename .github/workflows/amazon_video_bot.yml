@@ -21,18 +21,17 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1 imagemagick chromium-browser
+          sudo apt-get install -y ffmpeg libsndfile1 chromium-browser
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install "Pillow==9.5.0"
           pip uninstall -y moviepy
+          pip install "Pillow==9.5.0"
           pip install git+https://github.com/Zulko/moviepy.git@v2.0.0.dev2
           pip install requests beautifulsoup4 TTS \
                       selenium webdriver-manager \
                       google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
-
 
       - name: Run the bot
         env:
