@@ -33,6 +33,7 @@ jobs:
                       selenium webdriver-manager \
                       google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
 
+
       - name: Run the bot
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
