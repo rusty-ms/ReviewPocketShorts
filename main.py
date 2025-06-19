@@ -1,3 +1,4 @@
+os.environ["IMAGEMAGICK_BINARY"] = ""
 # main.py
 import os
 import requests
