@@ -1,5 +1,4 @@
 # main.py
-import os
 from moviepy.config import change_settings
 if os.getenv('GITHUB_ACTIONS'):
     change_settings({"IMAGEMAGICK_BINARY": None})
@@ -39,7 +38,8 @@ def get_trending_product():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    service = ChromeService(ChromeDriverManager().install())
+    chrome_path = ChromeDriverManager().install()
+    service = ChromeService(executable_path=chrome_path)
     driver = webdriver.Chrome(service=service, options=options)
 
     driver.get(url)
@@ -101,6 +101,7 @@ def get_trending_product():
 
 
 def create_video(image_url, audio_path, output_path, caption):
+    try:
     print(f"Downloading image from: {image_url}")
     response = requests.get(image_url)
     if response.status_code != 200:
@@ -119,14 +120,18 @@ def create_video(image_url, audio_path, output_path, caption):
 
     video = CompositeVideoClip([img.set_audio(audio), txt])
     print(f"Writing video to: {output_path}")
-    video.write_videofile(output_path, fps=24)
+            video.write_videofile(output_path, fps=24)
+    except Exception as e:
+        print(f"Video creation failed: {e}")
+        raise
     print("Video creation complete.")
 
 
+# Load TTS model once globally
+tts_model = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC")
 def generate_voiceover(text, filename):
     print(f"Generating voiceover for: {text}")
-    tts = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC")
-    tts.tts_to_file(text=text, file_path=filename)
+    tts_model.tts_to_file(text=text, file_path=filename)
     print(f"Voiceover saved to: {filename}")
 
 
@@ -147,7 +152,8 @@ def authenticate_youtube():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES)
+            # NOTE: This won't work in CI. Replace with service account or pre-generated token for automation.
+            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES")
             creds = flow.run_console()
         with open("token.pickle", "wb") as token:
             pickle.dump(creds, token)
