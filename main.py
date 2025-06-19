@@ -97,7 +97,7 @@ def create_video(image_url, audio_path, output_path, caption):
     video = CompositeVideoClip([img.set_audio(audio), txt])
     print(f"Writing video to: {output_path}")
     video.write_videofile(output_path, fps=24)
-    print("Video creation complete.
+    print("Video creation complete.")
 
 
 def generate_voiceover(text, filename):
@@ -181,4 +181,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()")
+    main()
