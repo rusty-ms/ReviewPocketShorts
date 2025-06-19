@@ -103,7 +103,7 @@ def get_trending_product():
 def create_video(image_url, audio_path, output_path, caption):
     try:
         print(f"Downloading image from: {image_url}")
-    response = requests.get(image_url)
+        response = requests.get(image_url)
     if response.status_code != 200:
         raise Exception(f"Failed to download image: {image_url}")
 
