@@ -27,6 +27,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install "Pillow==9.5.0"
+          pip uninstall -y moviepy
           pip install git+https://github.com/Zulko/moviepy.git@v2.0.0.dev2
           pip install requests beautifulsoup4 TTS \
                       selenium webdriver-manager \
