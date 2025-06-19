@@ -113,7 +113,7 @@ def create_video(image_url, audio_path, output_path, caption):
 
     print("Composing video...")
     img = ImageClip("temp.jpg").set_duration(audio.duration).resize(height=1920).set_position("center")
-        txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
+    txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
 
     video = CompositeVideoClip([img.set_audio(audio), txt])
     print(f"Writing video to: {output_path}")
