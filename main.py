@@ -103,28 +103,29 @@ def get_trending_product():
 def create_video(image_url, audio_path, output_path, caption):
     try:
         print(f"Downloading image from: {image_url}")
-    response = requests.get(image_url)
-    if response.status_code != 200:
-        raise Exception(f"Failed to download image: {image_url}")
+        response = requests.get(image_url)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download image: {image_url}")
 
-    with open("temp.jpg", "wb") as f:
-        f.write(response.content)
+        with open("temp.jpg", "wb") as f:
+            f.write(response.content)
 
-    print("Image saved as temp.jpg")
-    print(f"Loading audio from: {audio_path}")
-    audio = AudioFileClip(audio_path)
+        print("Image saved as temp.jpg")
+        print(f"Loading audio from: {audio_path}")
+        audio = AudioFileClip(audio_path)
 
-    print("Composing video...")
-    img = ImageClip("temp.jpg").set_duration(audio.duration).resize(height=1920).set_position("center")
-    txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
+        print("Composing video...")
+        img = ImageClip("temp.jpg").set_duration(audio.duration).resize(height=1920).set_position("center")
+        txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
 
-    video = CompositeVideoClip([img.set_audio(audio), txt])
-                    print(f"Writing video to: {output_path}")
-                video.write_videofile(output_path, fps=24)
+        video = CompositeVideoClip([img.set_audio(audio), txt])
+        print(f"Writing video to: {output_path}")
+        video.write_videofile(output_path, fps=24)
+        print("Video creation complete.")
+
     except Exception as e:
         print(f"Video creation failed: {e}")
         raise
-    print("Video creation complete.")
 
 
 # Load TTS model once globally
