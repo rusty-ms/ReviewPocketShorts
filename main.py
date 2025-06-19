@@ -39,9 +39,17 @@ def get_trending_product():
     driver = webdriver.Chrome(service=service, options=options)
 
     driver.get(url)
+
+    if "captcha" in driver.page_source.lower() or "Enter the characters you see below" in driver.page_source:
+        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
+        with open(debug_path, "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        print("CAPTCHA detected. Saved fallback HTML.")
+        raise Exception("Blocked by Amazon CAPTCHA page.")
+
     try:
         WebDriverWait(driver, 15).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-asin][data-asin!=''] img"))
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-asin]"))
         )
         soup = BeautifulSoup(driver.page_source, "html.parser")
     except Exception as e:
