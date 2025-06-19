@@ -102,7 +102,7 @@ def get_trending_product():
 
 def create_video(image_url, audio_path, output_path, caption):
     try:
-    print(f"Downloading image from: {image_url}")
+        print(f"Downloading image from: {image_url}")
     response = requests.get(image_url)
     if response.status_code != 200:
         raise Exception(f"Failed to download image: {image_url}")
@@ -119,8 +119,8 @@ def create_video(image_url, audio_path, output_path, caption):
     txt = TextClip(caption, fontsize=60, color='white', method='pillow').set_position(('center', 'bottom')).set_duration(audio.duration)
 
     video = CompositeVideoClip([img.set_audio(audio), txt])
-    print(f"Writing video to: {output_path}")
-            video.write_videofile(output_path, fps=24)
+            print(f"Writing video to: {output_path}")
+        video.write_videofile(output_path, fps=24)
     except Exception as e:
         print(f"Video creation failed: {e}")
         raise
@@ -153,7 +153,7 @@ def authenticate_youtube():
             creds.refresh(Request())
         else:
             # NOTE: This won't work in CI. Replace with service account or pre-generated token for automation.
-            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES")
+            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES)
             creds = flow.run_console()
         with open("token.pickle", "wb") as token:
             pickle.dump(creds, token)
