@@ -1,7 +1,11 @@
 # main.py
-from moviepy.config import change_settings
+import os
 if os.getenv('GITHUB_ACTIONS'):
-    change_settings({"IMAGEMAGICK_BINARY": None})
+    os.environ["IMAGEMAGICK_BINARY"] = "none"
+
+# Now safe to import MoviePy
+from moviepy.editor import *
+
 import os
 import requests
 from bs4 import BeautifulSoup
