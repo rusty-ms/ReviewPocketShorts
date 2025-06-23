@@ -1,7 +1,6 @@
 # main.py
 import os
-if os.getenv('GITHUB_ACTIONS'):
-    os.environ["IMAGEMAGICK_BINARY"] = "none"
+os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 
 # Now safe to import MoviePy
 from moviepy.editor import *
