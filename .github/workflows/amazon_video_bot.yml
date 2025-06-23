@@ -32,7 +32,12 @@ jobs:
           pip install requests beautifulsoup4 TTS \
                       selenium webdriver-manager \
                       google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
-
+      - name: Install ImageMagick
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+      
+      - name: Set ImageMagick path for MoviePy
+        run: |
+          echo "IMAGEMAGICK_BINARY=/usr/bin/convert" >> $GITHUB_ENV
       - name: Verify MoviePy version
         run: |
           python -c "import moviepy; print('MoviePy version:', moviepy.__version__)"
