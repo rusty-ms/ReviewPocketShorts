@@ -15,6 +15,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 import pickle
 import json
 from selenium import webdriver
@@ -26,7 +27,6 @@ OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
 
 def get_trending_product():
     from selenium.webdriver.common.by import By
@@ -127,30 +127,8 @@ def generate_voiceover(text, filename):
 
 
 def authenticate_youtube():
-    creds = None
-    credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not credentials_json:
-        raise Exception("GOOGLE_APPLICATION_CREDENTIALS not set in environment variables")
-
-    with open("client_secrets.json", "w") as f:
-        f.write(credentials_json)
-
-    if os.path.exists("token.pickle"):
-        with open("token.pickle", "rb") as token:
-            creds = pickle.load(token)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # NOTE: This won't work in CI. Replace with service account or pre-generated token for automation.
-            flow = InstalledAppFlow.from_client_secrets_file("client_secrets.json", SCOPES)
-            creds = flow.run_console()
-        with open("token.pickle", "wb") as token:
-            pickle.dump(creds, token)
-
+    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     return build("youtube", "v3", credentials=creds)
-
 
 def upload_video_to_youtube(file_path, title, description):
     print(f"Uploading {file_path} to YouTube...")
