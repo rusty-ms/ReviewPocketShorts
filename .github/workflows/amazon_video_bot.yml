@@ -13,7 +13,7 @@ jobs:
 
       - name: Restore token.json from secret
         run: |
-           echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}" | base64 -d > token.json
+          echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}" | base64 -d > token.json
 
       - name: Checkout repository
         uses: actions/checkout@v3
