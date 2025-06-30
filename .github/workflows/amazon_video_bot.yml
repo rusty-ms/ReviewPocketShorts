@@ -14,6 +14,11 @@ jobs:
       - name: Restore token.json from secret
         run: |
           echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}" | base64 -d > token.json
+          
+      - name: Debug:Show token.json exists
+        run: |
+          ls -lh token.json
+          head token.json || true
 
       - name: Checkout repository
         uses: actions/checkout@v3
