@@ -5,7 +5,6 @@ os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 import time
 import json
 import requests
-from bs4 import BeautifulSoup
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from moviepy.editor import AudioFileClip, ImageClip, CompositeVideoClip
@@ -24,35 +23,39 @@ def authenticate_youtube():
     return build("youtube", "v3", credentials=creds)
 
 def get_trending_product():
-    url = "https://www.amazon.com/Best-Sellers/zgbs"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
-    }
+    cache_path = os.path.join(OUTPUT_DIR, "cached_amazon_response.json")
+
+    if os.getenv("USE_CACHE") == "1" and os.path.exists(cache_path):
+        print("Using cached Amazon data for testing.")
+        with open(cache_path, "r") as f:
+            cached = json.load(f)
+        return cached["title"], cached["link"], cached["img"]
 
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        api_key = os.getenv("RAPIDAPI_KEY")
+        if not api_key:
+            raise Exception("RAPIDAPI_KEY environment variable is missing.")
+
+        url = "https://real-time-amazon-data.p.rapidapi.com/bestsellers"
+        headers = {
+            "X-RapidAPI-Key": api_key,
+            "X-RapidAPI-Host": "real-time-amazon-data.p.rapidapi.com"
+        }
+        params = {"category_id": "aps", "country": "US"}
+
+        response = requests.get(url, headers=headers, params=params, timeout=15)
         response.raise_for_status()
-        soup = BeautifulSoup(response.text, "html.parser")
+        data = response.json()
 
-        # Save the response HTML for debugging
-        with open(os.path.join(OUTPUT_DIR, "amazon_debug.html"), "w", encoding="utf-8") as f:
-            f.write(response.text)
-
-        item = soup.select_one(".zg-grid-general-faceout a")
-        img_tag = soup.select_one(".zg-grid-general-faceout img")
-
-        if not item or not img_tag:
-            raise Exception("Could not find product info in Amazon Best Sellers page.")
-
-        title = item.get("title") or item.text.strip()
+        product = data["data"]["products"][0]
+        title = product["title"]
+        asin = product["asin"]
+        img = product["image"]
         tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
-        link = f"https://www.amazon.com{item.get('href')}?tag={tag}"
-        img = img_tag.get("src")
+        link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
 
         # Track ASINs to prevent repeats
         seen_asins_path = os.path.join(OUTPUT_DIR, "seen_asins.txt")
-        asin = item.get("href", "").split("/dp/")[-1].split("/")[0]
-
         if asin:
             if os.path.exists(seen_asins_path):
                 with open(seen_asins_path, "r") as f:
@@ -66,9 +69,13 @@ def get_trending_product():
             with open(seen_asins_path, "a") as f:
                 f.write(asin + "\n")
 
+        # Cache result
+        with open(cache_path, "w") as f:
+            json.dump({"title": title, "link": link, "img": img}, f)
+
         return title, link, img
     except Exception as e:
-        print("Failed to scrape Amazon Best Sellers:", e)
+        print("Failed to fetch from RapidAPI:", e)
         raise
 
 def generate_voiceover(text, filepath):
