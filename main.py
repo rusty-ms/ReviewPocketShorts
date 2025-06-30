@@ -1,5 +1,7 @@
 # main.py
 import os
+os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
+
 import time
 import json
 import requests
@@ -9,9 +11,6 @@ from googleapiclient.discovery import build
 from moviepy.editor import AudioFileClip, ImageClip, CompositeVideoClip
 from datetime import datetime
 from TTS.api import TTS
-
-# Set ImageMagick path for moviepy
-os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 OUTPUT_DIR = "output"
@@ -46,7 +45,7 @@ def get_trending_product():
             raise Exception("Could not find product info in Amazon Best Sellers page.")
 
         title = item.get("title") or item.text.strip()
-        tag = os.getenv("AMAZON_AFFILIATE_TAG", "reviewpockets-20")
+        tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
         link = f"https://www.amazon.com{item.get('href')}?tag={tag}"
         img = img_tag.get("src")
 
