@@ -1,180 +1,140 @@
 # main.py
 import os
-os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
-
-# Now safe to import MoviePy
-from moviepy.editor import *
-
-import os
+import time
+import json
 import requests
 from bs4 import BeautifulSoup
-from moviepy.editor import *
-from TTS.api import TTS
-from datetime import datetime
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-import pickle
-import json
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
+from googleapiclient.discovery import build
+from moviepy.editor import AudioFileClip, ImageClip, CompositeVideoClip
+from datetime import datetime
+from TTS.api import TTS
 
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
-def get_trending_product():
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
-
-    url = "https://www.amazon.com/Best-Sellers/zgbs"
-    print("Launching headless Chrome to scrape Amazon best sellers...")
-
-    options = Options()
-    options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    chrome_path = ChromeDriverManager().install()
-    service = ChromeService(executable_path=chrome_path)
-    driver = webdriver.Chrome(service=service, options=options)
-
-    driver.get(url)
-
-    if "captcha" in driver.page_source.lower() or "Enter the characters you see below" in driver.page_source:
-        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
-        with open(debug_path, "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        print("CAPTCHA detected. Saved fallback HTML.")
-        raise Exception("Blocked by Amazon CAPTCHA page.")
-
-    try:
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-asin]"))
-        )
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-    except Exception as e:
-        print(f"Timeout or error waiting for content: {e}")
-        html = driver.page_source
-        debug_path = os.path.join(OUTPUT_DIR, "amazon_debug.html")
-        with open(debug_path, "w", encoding="utf-8") as f:
-            f.write(html)
-        print(f"Saved fallback HTML to {debug_path}")
-        raise Exception("Amazon page did not load correctly.")
-    finally:
-        driver.quit()
-
-    seen_asins_path = os.path.join(OUTPUT_DIR, "seen_asins.txt")
-    if os.path.exists(seen_asins_path):
-        with open(seen_asins_path, "r") as f:
-            seen_asins = set(line.strip() for line in f)
-    else:
-        seen_asins = set()
-
-    products = soup.select("div[data-asin][data-asin!='']")
-    for product in products:
-        asin = product["data-asin"].strip()
-        if asin in seen_asins:
-            continue  # skip duplicates
-
-        img_tag = product.select_one("img")
-        if not img_tag:
-            continue
-        title = img_tag.get("alt", "Unknown Product").strip()
-        img = img_tag.get("src", "")
-        tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
-        link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
-
-        # Save this ASIN to prevent reuse
-        with open(seen_asins_path, "a") as f:
-            f.write(asin + "\n")
-
-        print(f"Product Title: {title}")
-        print(f"Product Link: {link}")
-        print(f"Image URL: {img}")
-        return title, link, img
-
-    raise Exception("No new products found.")
-
-
-def create_video(image_path, audio_path, output_path, title=None):
-    # Load audio
-    audio = AudioFileClip(audio_path)
-
-    # Create a video clip from the image, match duration to audio
-    clip = ImageClip(image_path).set_duration(audio.duration).set_audio(audio).set_fps(24)
-
-    # You were adding a text overlay here. Removed for now.
-    # txt = TextClip(...)
-
-    # Create composite video with just the image for now
-    final = CompositeVideoClip([clip], size=clip.size)
-    final.write_videofile(output_path, codec='libx264', audio_codec='aac')
-
-
-# Load TTS model once globally
-tts_model = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC")
-def generate_voiceover(text, filename):
-    print(f"Generating voiceover for: {text}")
-    tts_model.tts_to_file(text=text, file_path=filename)
-    print(f"Voiceover saved to: {filename}")
-
+# Load TTS model once
+tts_model = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False)
 
 def authenticate_youtube():
     creds = Credentials.from_authorized_user_file("token.json", SCOPES)
     return build("youtube", "v3", credentials=creds)
 
-def upload_video_to_youtube(file_path, title, description):
-    print(f"Uploading {file_path} to YouTube...")
+def get_trending_product():
+    url = "https://www.amazon.com/Best-Sellers/zgbs"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Save the response HTML for debugging
+        with open(os.path.join(OUTPUT_DIR, "amazon_debug.html"), "w", encoding="utf-8") as f:
+            f.write(response.text)
+
+        item = soup.select_one(".zg-grid-general-faceout a")
+        img_tag = soup.select_one(".zg-grid-general-faceout img")
+
+        if not item or not img_tag:
+            raise Exception("Could not find product info in Amazon Best Sellers page.")
+
+        title = item.get("title") or item.text.strip()
+        tag = os.getenv("AMAZON_AFFILIATE_TAG", "reviewpockets-20")
+        link = f"https://www.amazon.com{item.get('href')}?tag={tag}"
+        img = img_tag.get("src")
+
+        # Track ASINs to prevent repeats
+        seen_asins_path = os.path.join(OUTPUT_DIR, "seen_asins.txt")
+        asin = item.get("href", "").split("/dp/")[-1].split("/")[0]
+
+        if asin:
+            if os.path.exists(seen_asins_path):
+                with open(seen_asins_path, "r") as f:
+                    seen_asins = set(line.strip() for line in f)
+            else:
+                seen_asins = set()
+
+            if asin in seen_asins:
+                raise Exception("ASIN already used. Skipping.")
+
+            with open(seen_asins_path, "a") as f:
+                f.write(asin + "\n")
+
+        return title, link, img
+    except Exception as e:
+        print("Failed to scrape Amazon Best Sellers:", e)
+        raise
+
+def generate_voiceover(text, filepath):
+    print(f"Generating voiceover for: {text}")
+    tts_model.tts_to_file(text=text, file_path=filepath)
+    print(f"Voiceover saved to: {filepath}")
+
+def create_video(image_path, audio_path, output_path):
+    audio = AudioFileClip(audio_path)
+    clip = ImageClip(image_path).set_duration(audio.duration).set_audio(audio).set_fps(24)
+    final = CompositeVideoClip([clip], size=clip.size)
+    final.write_videofile(output_path, codec='libx264', audio_codec='aac')
+
+def upload_video_to_youtube(video_path, title, description):
     youtube = authenticate_youtube()
-    request_body = {
+
+    body = {
         "snippet": {
-            "categoryId": "22",
             "title": title,
             "description": description,
-            "tags": ["amazon", "review", "product"]
+            "tags": ["Amazon", "Review", "Trending"],
+            "categoryId": "22"
         },
         "status": {
             "privacyStatus": "public",
-            "selfDeclaredMadeForKids": False
         }
     }
 
-    mediaFile = MediaFileUpload(file_path)
-    youtube.videos().insert(
-        part="snippet,status",
-        body=request_body,
-        media_body=mediaFile
-    ).execute()
-    print("Upload complete.")
-
+    print(f"Uploading {video_path} to YouTube...")
+    request = youtube.videos().insert(
+        part=",".join(body.keys()),
+        body=body,
+        media_body=video_path
+    )
+    response = request.execute()
+    print("Upload complete.", json.dumps(response, indent=2))
 
 def main():
     title, link, img = get_trending_product()
+    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    image_file = f"{OUTPUT_DIR}/image_{now}.jpg"
+    audio_file = f"{OUTPUT_DIR}/audio_{now}.mp3"
+    video_file = f"{OUTPUT_DIR}/video_{now}.mp4"
+    description_file = f"{OUTPUT_DIR}/description_{now}.txt"
+
+    # Download image
+    img_data = requests.get(img).content
+    with open(image_file, 'wb') as handler:
+        handler.write(img_data)
+
+    # Generate voiceover
     short_desc = f"🔥 Trending on Amazon: {title}!"
-    call_to_action = f"👉 Check it out here: {link}"
-    full_description = short_desc + call_to_action
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    audio_file = f"{OUTPUT_DIR}/audio_{timestamp}.mp3"
-    video_file = f"{OUTPUT_DIR}/video_{timestamp}.mp4"
-    desc_file = f"{OUTPUT_DIR}/description_{timestamp}.txt"
-
     generate_voiceover(short_desc, audio_file)
-    create_video(img, audio_file, video_file, title)
 
-    with open(desc_file, "w") as f:
+    # Save description
+    full_description = f"{short_desc}\n\n👉 Check it out here: {link}"
+    with open(description_file, "w") as f:
         f.write(full_description)
-    print(f"Description saved to: {desc_file}")
 
+    print(f"Description saved to: {description_file}")
+
+    # Create video
+    create_video(image_file, audio_file, video_file)
+    print(f"Moviepy - video ready {video_file}")
+
+    # Upload to YouTube
     upload_video_to_youtube(video_file, title, full_description)
-
 
 if __name__ == "__main__":
     main()
