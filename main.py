@@ -46,7 +46,7 @@ def get_trending_product():
             raise Exception("Could not find product info in Amazon Best Sellers page.")
 
         title = item.get("title") or item.text.strip()
-        tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
+        tag = os.getenv("AMAZON_AFFILIATE_TAG", "reviewpockets-20")
         link = f"https://www.amazon.com{item.get('href')}?tag={tag}"
         img = img_tag.get("src")
 
