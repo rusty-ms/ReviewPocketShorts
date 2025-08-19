@@ -37,7 +37,7 @@ jobs:
           # Optional: specify categories to pick from (comma‑separated slugs).  If omitted,
           # the script will use a default list of popular categories.  See
           # generate_video_from_api.py for details.
-          # CATEGORY_LIST: "beauty,electronics,home-kitchen,toys-games,office-products,pet-supplies,fashion"
+          CATEGORY_LIST: "books,electronics,home-kitchen,toys-games,beauty,office-products,clothing-shoes-jewelry,sports-outdoors"
           # Optional: Amazon affiliate tag for link tracking
           AMAZON_AFFILIATE_TAG: ${{ secrets.AMAZON_AFFILIATE_TAG }}
           # Optional: customise the marketplace region and language
