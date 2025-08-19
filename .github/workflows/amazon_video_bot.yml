@@ -11,14 +11,6 @@ jobs:
 
     steps:
 
-      - name: Restore token.json from secret
-        run: |
-          echo "${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}" | base64 -d > token.json
-          
-      - name: Debug:Show token.json exists
-        run: |
-          ls -lh token.json
-          head token.json || true
 
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -31,31 +23,18 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1 chromium-browser
+          sudo apt-get install -y ffmpeg libsndfile1
 
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip uninstall -y moviepy
-          pip install "Pillow==9.5.0"
-          pip install git+https://github.com/Zulko/moviepy.git@v2.0.0.dev2
-          pip install requests beautifulsoup4 TTS \
-                      selenium webdriver-manager \
-                      google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
-      - name: Install ImageMagick
-        run: sudo apt-get update && sudo apt-get install -y imagemagick
-      
-      - name: Set ImageMagick path for MoviePy
-        run: |
-          echo "IMAGEMAGICK_BINARY=/usr/bin/convert" >> $GITHUB_ENV
-      - name: Verify MoviePy version
-        run: |
-          python -c "import moviepy; print('MoviePy version:', moviepy.__version__)"
+          pip install -r requirements.txt
 
       - name: Run the bot
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
-          AMAZON_AFFILIATE_TAG: ${{ secrets.AMAZON_AFFILIATE_TAG }}
-          IMAGEMAGICK_BINARY: ""
+          # Set your product details here or expose them as secrets
+          PRODUCT_TITLE: ${{ secrets.PRODUCT_TITLE }}
+          PRODUCT_IMAGE_URL: ${{ secrets.PRODUCT_IMAGE_URL }}
+          PRODUCT_LINK: ${{ secrets.PRODUCT_LINK }}
         run: |
-          python main.py
+          python make_short.py
