@@ -32,9 +32,16 @@ jobs:
 
       - name: Run the bot
         env:
-          # Set your product details here or expose them as secrets
-          PRODUCT_TITLE: ${{ secrets.PRODUCT_TITLE }}
-          PRODUCT_IMAGE_URL: ${{ secrets.PRODUCT_IMAGE_URL }}
-          PRODUCT_LINK: ${{ secrets.PRODUCT_LINK }}
+          # RapidAPI authentication for Real‑Time Amazon Data
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          # Optional: specify categories to pick from (comma‑separated slugs).  If omitted,
+          # the script will use a default list of popular categories.  See
+          # generate_video_from_api.py for details.
+          # CATEGORY_LIST: "beauty,electronics,home-kitchen,toys-games,office-products,pet-supplies,fashion"
+          # Optional: Amazon affiliate tag for link tracking
+          AMAZON_AFFILIATE_TAG: ${{ secrets.AMAZON_AFFILIATE_TAG }}
+          # Optional: customise the marketplace region and language
+          REGION: "US"
+          LANGUAGE: "en"
         run: |
-          python make_short.py
+          python generate_video_from_api.py
