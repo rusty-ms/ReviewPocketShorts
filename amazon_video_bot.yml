@@ -1,0 +1,40 @@
+name: Amazon Review Bot
+
+on:
+  schedule:
+    - cron: "0 14 * * *"  # Daily at 2PM UTC
+  workflow_dispatch:
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libsndfile1
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the bot
+        env:
+          # Set your product details here or expose them as secrets
+          PRODUCT_TITLE: ${{ secrets.PRODUCT_TITLE }}
+          PRODUCT_IMAGE_URL: ${{ secrets.PRODUCT_IMAGE_URL }}
+          PRODUCT_LINK: ${{ secrets.PRODUCT_LINK }}
+        run: |
+          python make_short.py
