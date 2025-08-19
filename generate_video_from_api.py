@@ -14,29 +14,39 @@ Required environment variables:
 
   RAPIDAPI_KEY      – Your RapidAPI key (X‑RapidAPI‑Key).  Obtain this
                       from your RapidAPI developer dashboard.
-  PRODUCT_ASIN      – The ASIN of the Amazon product to fetch.  You
-                      can supply multiple ASINs separated by commas to
-                      fetch the first available product.
 
 Optional environment variables:
 
-  RAPIDAPI_HOST     – The RapidAPI host for the service
-                      (default: ``real-time-amazon-data.p.rapidapi.com``).
+  RAPIDAPI_HOST     – The RapidAPI host for the ranking and product endpoints.
+                      Defaults to ``real-time-amazon-data5.p.rapidapi.com``, which
+                      hosts the v1 ranking endpoints such as ``/v1/rankings/movers-shakers``.
   REGION            – Amazon marketplace region code (default: ``US``).
+  LANGUAGE          – ISO language code for the data returned by the API
+                      (default: ``en``).
+  CATEGORY_LIST     – Comma‑separated list of Amazon category slugs to
+                      choose from when selecting a trending product.  If not
+                      provided, a sensible default list of popular categories
+                      (e.g. ``beauty,electronics,home-kitchen,toys-games``)
+                      will be used.
+  USED_ASINS_FILE   – Path to a JSON file used to persist the ASINs of
+                      products that have already been featured.  Defaults
+                      to ``used_asins.json`` in the current working directory.
   AMAZON_AFFILIATE_TAG – Your Amazon Associates affiliate tag.  When
                       present, the product link in the voice‑over will
                       include this tag.
 
 Example usage:
 
-    RAPIDAPI_KEY=xxxxx PRODUCT_ASIN=B07ZPKBL9V python generate_video_from_api.py
+    RAPIDAPI_KEY=xxxxx python generate_video_from_api.py
 
-The script will contact the API endpoint ``/product`` with the
-specified ASIN and region, parse the product title and image URL,
-generate a voice‑over that mentions the product and optionally
-promotes a link with your affiliate tag, then create a video.  You can
-open the resulting ``output/video.mp4`` file locally or upload it
-wherever you like.
+This script will call the ``/v1/rankings/movers-shakers`` endpoint for a
+random category to obtain a currently trending product.  It will
+avoid repeating ASINs across runs by recording used ASINs in a JSON
+file.  After selecting a product, it fetches additional details via
+``/product`` and reviews via ``/v1/products/reviews``.  It then
+generates a short voice‑over and video as before.  You can open the
+resulting ``output/video.mp4`` file locally or upload it wherever you
+like.
 
 Note:  Never commit your RapidAPI key directly into your source code
 or repository.  Use environment variables or secret managers to
@@ -48,7 +58,8 @@ environment.
 import asyncio
 import json
 import os
-from typing import Optional, Tuple
+import random
+from typing import List, Optional, Tuple
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
@@ -56,8 +67,11 @@ from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
 import edge_tts
 
 
-def fetch_product_details(asin: str, region: str, rapidapi_key: str, host: str) -> Tuple[str, str, str]:
-    """Fetch product details from the Real‑Time Amazon Data API.
+def fetch_product_details(
+    asin: str, region: str, rapidapi_key: str, host: str
+) -> Tuple[str, str, str]:
+    """
+    Fetch product details from the Real‑Time Amazon Data API.
 
     Parameters
     ----------
@@ -68,8 +82,7 @@ def fetch_product_details(asin: str, region: str, rapidapi_key: str, host: str) 
     rapidapi_key : str
         Your RapidAPI key used for authentication.
     host : str
-        The RapidAPI host for the Real‑Time Amazon Data API.  Defaults
-        to ``real-time-amazon-data.p.rapidapi.com``.
+        The RapidAPI host for the Real‑Time Amazon Data API.
 
     Returns
     -------
@@ -90,13 +103,8 @@ def fetch_product_details(asin: str, region: str, rapidapi_key: str, host: str) 
     response = requests.get(url, headers=headers, params=params, timeout=30)
     response.raise_for_status()
     data = response.json()
-    # Expect the API to return a top-level dictionary with product
-    # details under keys like "product_title", "product_photo" and
-    # "product_url".  These names are based on the API documentation
-    # and may need adjustment if the provider changes their schema.
     try:
         title: str = data["product_title"]
-        # product_photo may be a string or a list; normalise to str
         photo = data["product_photo"]
         if isinstance(photo, list):
             image_url = photo[0]
@@ -108,6 +116,153 @@ def fetch_product_details(asin: str, region: str, rapidapi_key: str, host: str) 
         raise ValueError(
             f"Unexpected response format when fetching product {asin}: {json.dumps(data)[:500]}"
         ) from exc
+
+
+def fetch_top_reviews(
+    asin: str,
+    region: str,
+    language: str,
+    rapidapi_key: str,
+    host: str,
+    max_reviews: int = 3,
+) -> List[str]:
+    """
+    Fetch top customer reviews for a product.
+
+    This function calls the ``/v1/products/reviews`` endpoint to retrieve
+    reviews for the given ASIN.  It returns up to ``max_reviews`` review
+    bodies.  If the API fails or returns no reviews, an empty list is
+    returned.
+
+    Parameters
+    ----------
+    asin : str
+        The product ASIN to fetch reviews for.
+    region : str
+        Marketplace region code (e.g. ``US``).
+    language : str
+        Two‑letter language code for the response (e.g. ``en``).
+    rapidapi_key : str
+        RapidAPI key for authentication.
+    host : str
+        RapidAPI host for the Real‑Time Amazon Data API.
+    max_reviews : int, optional
+        Maximum number of reviews to return.  Defaults to 3.
+
+    Returns
+    -------
+    list of str
+        A list of review body strings.
+    """
+    url = f"https://{host}/v1/products/reviews"
+    headers = {
+        "X-RapidAPI-Key": rapidapi_key,
+        "X-RapidAPI-Host": host,
+    }
+    params = {
+        "asin": asin,
+        "country": region,
+        "language": language,
+        "page": 1,
+    }
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+    except Exception:
+        return []
+    data = response.json()
+    reviews = []
+    # The structure of the response may vary; attempt to extract review text.
+    try:
+        results = data.get("reviews") or data.get("data", {}).get("reviews", [])
+        for review in results:
+            # Attempt multiple keys for the review body
+            text = review.get("review") or review.get("review_body") or review.get("content")
+            if text:
+                reviews.append(text.strip())
+            if len(reviews) >= max_reviews:
+                break
+        return reviews
+    except Exception:
+        return []
+
+
+def fetch_random_trending_product(
+    categories: List[str],
+    region: str,
+    language: str,
+    rapidapi_key: str,
+    host: str,
+    used_asins: set,
+) -> Optional[dict]:
+    """
+    Fetch a random trending product from the movers‑and‑shakers list.
+
+    This function randomly selects a category from ``categories``,
+    calls the ``/v1/rankings/movers-shakers`` endpoint, shuffles the
+    results and returns the first product whose ASIN is not present in
+    ``used_asins``.  If no unused product is found after trying all
+    categories, ``None`` is returned.
+
+    Parameters
+    ----------
+    categories : list of str
+        List of category slugs to pick from.
+    region : str
+        Marketplace region code (e.g. ``US``).
+    language : str
+        Two‑letter language code (e.g. ``en``).
+    rapidapi_key : str
+        RapidAPI key for authentication.
+    host : str
+        RapidAPI host for the ranking endpoints (should end with ``.p.rapidapi.com``).
+    used_asins : set
+        A set of ASINs that have already been featured.
+
+    Returns
+    -------
+    dict or None
+        A dictionary representing a product entry from the API result,
+        or ``None`` if nothing suitable could be found.
+    """
+    random_categories = categories[:]
+    random.shuffle(random_categories)
+    for category in random_categories:
+        url = f"https://{host}/v1/rankings/movers-shakers"
+        headers = {
+            "X-RapidAPI-Key": rapidapi_key,
+            "X-RapidAPI-Host": host,
+        }
+        params = {
+            "category": category,
+            "country": region,
+            "language": language,
+            "page": 1,
+        }
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+        except Exception:
+            continue
+        data = response.json()
+        # Results may be under different keys depending on provider.
+        products = (
+            data.get("results")
+            or data.get("data", {}).get("results")
+            or data.get("data", {}).get("products")
+            or []
+        )
+        random.shuffle(products)
+        for product in products:
+            asin = (
+                product.get("asin")
+                or product.get("asin13")
+                or product.get("asin_10")
+                or None
+            )
+            if asin and asin not in used_asins:
+                return product
+    return None
 
 
 async def generate_voiceover(text: str, output_path: str, voice: str = "en-US-AriaNeural") -> None:
@@ -244,35 +399,92 @@ def create_video(
 
 
 def main() -> None:
+    """Entry point for the script.
+
+    This function orchestrates the workflow: it reads environment
+    variables, selects a random trending product, fetches details and
+    reviews, generates a voice‑over and video, and records the ASIN
+    to avoid repetition on subsequent runs.
+    """
     # Read configuration from environment variables
     rapidapi_key = os.getenv("RAPIDAPI_KEY")
     if not rapidapi_key:
         raise RuntimeError(
             "RAPIDAPI_KEY is not set. Please export your RapidAPI key as an environment variable."
         )
-    host = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
+    host = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data5.p.rapidapi.com")
     region = os.getenv("REGION", "US")
-    raw_asins = (os.getenv("PRODUCT_ASIN", "").strip())
-    if not raw_asins:
-        raise RuntimeError(
-            "PRODUCT_ASIN is not set. Please specify the ASIN of the product you wish to fetch."
-        )
-    # If multiple ASINs are provided (comma separated), pick the first non-empty entry
-    asin = next((a for a in raw_asins.split(",") if a.strip()), None)
+    language = os.getenv("LANGUAGE", "en")
+    # Determine category list: user may provide comma‑separated categories
+    raw_categories = os.getenv("CATEGORY_LIST", "").strip()
+    if raw_categories:
+        categories = [c.strip() for c in raw_categories.split(",") if c.strip()]
+    else:
+        # Default categories chosen for diversity; feel free to adjust
+        categories = [
+            "beauty",
+            "electronics",
+            "home-kitchen",
+            "toys-games",
+            "office-products",
+            "pet-supplies",
+            "fashion",
+        ]
+    # Load or initialise the used ASINs set
+    used_file = os.getenv("USED_ASINS_FILE", "used_asins.json")
+    used_asins: set = set()
+    if os.path.exists(used_file):
+        try:
+            with open(used_file, "r") as f:
+                used_asins = set(json.load(f))
+        except Exception:
+            used_asins = set()
+    # Select a random trending product that has not been used
+    product_entry = fetch_random_trending_product(
+        categories, region, language, rapidapi_key, host, used_asins
+    )
+    if product_entry is None:
+        raise RuntimeError("Could not find a new trending product. Try expanding the category list.")
+    asin = (
+        product_entry.get("asin")
+        or product_entry.get("asin13")
+        or product_entry.get("asin_10")
+    )
     if not asin:
-        raise RuntimeError("No valid ASIN provided.")
-    # Fetch product details from API
+        raise RuntimeError("Selected product does not have a valid ASIN.")
+    # Record ASIN into used set and save
+    used_asins.add(asin)
+    try:
+        with open(used_file, "w") as f:
+            json.dump(sorted(list(used_asins)), f)
+    except Exception:
+        pass
+    # Fetch product details to obtain title, high resolution image and canonical URL
     title, image_url, product_url = fetch_product_details(asin, region, rapidapi_key, host)
+    # Fetch top reviews
+    reviews = fetch_top_reviews(asin, region, language, rapidapi_key, host, max_reviews=3)
     # Construct voice‑over text
     affiliate_tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
     if affiliate_tag:
         affiliate_link = f"https://www.amazon.com/dp/{asin}?tag={affiliate_tag}"
     else:
         affiliate_link = product_url
-    tagline = f"🔥 Trending on Amazon: {title}!"
-    description = f"Check out {title} on Amazon!"
+    tagline = f"🔥 Trending Amazon find: {title}!"
+    # Build description with reviews if available
+    description_lines = [f"Check out {title} – it's trending right now on Amazon!"]
+    if reviews:
+        description_lines.append("")
+        description_lines.append("Here's what customers are saying:")
+        for i, review in enumerate(reviews, start=1):
+            # Limit review length to 200 characters for brevity
+            snippet = review.strip().replace("\n", " ")
+            if len(snippet) > 200:
+                snippet = snippet[:197] + "..."
+            description_lines.append(f"• {snippet}")
     if affiliate_link:
-        description += f"\n\n👉 Buy it here: {affiliate_link}"
+        description_lines.append("")
+        description_lines.append(f"👉 Find it here: {affiliate_link}")
+    description = "\n".join(description_lines)
     # Prepare output directories
     output_dir = os.path.join(os.getcwd(), "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -284,7 +496,7 @@ def main() -> None:
     asyncio.run(generate_voiceover(description, audio_path))
     # Create video
     create_video(title, image_path, audio_path, tagline, output_dir)
-    print(f"Successfully created video for {title}")
+    print(f"Successfully created video for {title} ({asin})")
 
 
 if __name__ == "__main__":
