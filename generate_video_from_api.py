@@ -228,40 +228,47 @@ def fetch_random_trending_product(
     random_categories = categories[:]
     random.shuffle(random_categories)
     for category in random_categories:
-        url = f"https://{host}/v1/rankings/movers-shakers"
-        headers = {
-            "X-RapidAPI-Key": rapidapi_key,
-            "X-RapidAPI-Host": host,
-        }
-        params = {
-            "category": category,
-            "country": region,
-            "language": language,
-            "page": 1,
-        }
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=30)
-            response.raise_for_status()
-        except Exception:
-            continue
-        data = response.json()
-        # Results may be under different keys depending on provider.
-        products = (
-            data.get("results")
-            or data.get("data", {}).get("results")
-            or data.get("data", {}).get("products")
-            or []
-        )
-        random.shuffle(products)
-        for product in products:
-            asin = (
-                product.get("asin")
-                or product.get("asin13")
-                or product.get("asin_10")
-                or None
+        # The ranking endpoints may live under two different path patterns
+        # depending on the API provider.  Try both patterns.  The first
+        # corresponds to OpenWeb Ninja's ``/api/v1/amazon/rankings/movers-shakers``
+        # and the second to APIcalls.io's ``/v1/rankings/movers-shakers``.
+        for path in ["/api/v1/amazon/rankings/movers-shakers", "/v1/rankings/movers-shakers"]:
+            url = f"https://{host}{path}"
+            headers = {
+                "X-RapidAPI-Key": rapidapi_key,
+                "X-RapidAPI-Host": host,
+            }
+            params = {
+                "category": category,
+                "country": region,
+                "language": language,
+                "page": 1,
+            }
+            try:
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+            except Exception:
+                continue
+            data = response.json()
+            products = (
+                data.get("results")
+                or data.get("data", {}).get("results")
+                or data.get("data", {}).get("products")
+                or []
             )
-            if asin and asin not in used_asins:
-                return product
+            if not products:
+                continue
+            random.shuffle(products)
+            for product in products:
+                asin = (
+                    product.get("asin")
+                    or product.get("asin13")
+                    or product.get("asin_10")
+                    or None
+                )
+                if asin and asin not in used_asins:
+                    return product
+        # If both patterns fail, try the next category
     return None
 
 
@@ -426,7 +433,10 @@ def main() -> None:
         raise RuntimeError(
             "RAPIDAPI_KEY is not set. Please export your RapidAPI key as an environment variable."
         )
-    host = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data5.p.rapidapi.com")
+    # Use the OpenWeb Ninja Real‑Time Amazon Data host by default.  Some
+    # providers expose their endpoints under a host suffix like ``data5``,
+    # but the official OpenWeb Ninja API uses ``real-time-amazon-data.p.rapidapi.com``.
+    host = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
     region = os.getenv("REGION", "US")
     language = os.getenv("LANGUAGE", "en")
     # Determine category list: user may provide comma‑separated categories
