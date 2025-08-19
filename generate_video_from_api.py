@@ -275,8 +275,22 @@ async def generate_voiceover(text: str, output_path: str, voice: str = "en-US-Ar
 
 
 def download_image(url: str, path: str) -> None:
-    """Download an image from a URL and save it to the given path."""
-    resp = requests.get(url, timeout=30)
+    """
+    Download an image from a URL and save it to the given path.
+
+    Many image hosting providers block requests without a recognised
+    ``User‑Agent`` header.  To prevent 403 "Forbidden" errors, we
+    supply a common browser User‑Agent.  If the download fails,
+    the caller should catch the exception and decide how to proceed.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/115.0 Safari/537.36"
+        )
+    }
+    resp = requests.get(url, headers=headers, timeout=30)
     resp.raise_for_status()
     with open(path, "wb") as f:
         f.write(resp.content)
