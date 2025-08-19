@@ -457,8 +457,19 @@ def main() -> None:
     product_entry = fetch_random_trending_product(
         categories, region, language, rapidapi_key, host, used_asins
     )
+    # If no unused product is found, try again without filtering used ASINs so that
+    # there is always at least one product to process.  This ensures the script
+    # does not fail when the category list is valid but all returned products
+    # have already been used.  Only if the API returns an empty result set will
+    # the script raise an error.
     if product_entry is None:
-        raise RuntimeError("Could not find a new trending product. Try expanding the category list.")
+        product_entry = fetch_random_trending_product(
+            categories, region, language, rapidapi_key, host, set()
+        )
+        if product_entry is None:
+            raise RuntimeError(
+                "Could not find any trending product. Check your category list or RapidAPI subscription."
+            )
     asin = (
         product_entry.get("asin")
         or product_entry.get("asin13")
