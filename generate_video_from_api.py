@@ -518,14 +518,17 @@ def create_video(
 
 
 def main() -> None:
-    """Entry point for the script.
+    """
+    Entry point for the script.
 
-    This function orchestrates the workflow: it reads environment
-    variables, attempts to select a trending product via the Movers &
-    Shakers endpoint, falls back to a search if no trending product
-    is available, fetches details and reviews, generates a voice‑over
-    and video, and records the ASIN to avoid repetition on subsequent
-    runs.
+    This revised version relies primarily on product search rather than
+    ranking endpoints to select a product.  Ranking endpoints (like
+    Movers & Shakers) are not consistently available across all
+    providers and plans, so falling back to search ensures that a
+    product is always found.  The script constructs a list of search
+    queries from the provided categories and optional additional
+    queries, executes the search API, selects a random result, fetches
+    details and reviews, then composes a short video.
     """
     # Read configuration from environment variables
     rapidapi_key = os.getenv("RAPIDAPI_KEY")
@@ -533,20 +536,17 @@ def main() -> None:
         raise RuntimeError(
             "RAPIDAPI_KEY is not set. Please export your RapidAPI key as an environment variable."
         )
-    # Determine which RapidAPI host to use.  The OpenWeb Ninja API uses
-    # ``real-time-amazon-data.p.rapidapi.com`` while other providers
-    # may suffix with ``data5``.  You can override via RAPIDAPI_HOST.
     host = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
     region = os.getenv("REGION", "US")
     language = os.getenv("LANGUAGE", "en")
 
-    # Determine category list from environment or use sensible defaults.
+    # Determine category list from environment or default.  These slugs
+    # correspond to Amazon departments.  They will be converted to
+    # human-friendly search phrases (hyphens replaced with spaces).
     raw_categories = os.getenv("CATEGORY_LIST", "").strip()
     if raw_categories:
         categories = [c.strip() for c in raw_categories.split(",") if c.strip()]
     else:
-        # Default categories are broad; adjust to your needs.  These slugs come
-        # from Amazon's department pages (e.g. ``home-kitchen`` for Home & Kitchen).
         categories = [
             "beauty",
             "electronics",
@@ -561,76 +561,42 @@ def main() -> None:
             "grocery-gourmet-food",
         ]
 
-    # Load or initialise the used ASINs set to avoid repeats across runs
-    used_file = os.getenv("USED_ASINS_FILE", "used_asins.json")
-    used_asins: set = set()
-    if os.path.exists(used_file):
-        try:
-            with open(used_file, "r") as f:
-                used_asins = set(json.load(f))
-        except Exception:
-            used_asins = set()
+    # Convert category slugs into search-friendly phrases (replace hyphens with spaces)
+    category_queries = [c.replace("-", " ") for c in categories]
 
-    # Determine if verbose debugging is enabled.  Set the environment
-    # variable DEBUG=1 or VERBOSE=1 to print additional diagnostic
-    # messages about API calls and selection logic.
+    # Parse additional search queries from environment
+    raw_queries = os.getenv("SEARCH_QUERIES", "").strip()
+    additional_queries: List[str] = []
+    if raw_queries:
+        additional_queries = [q.strip() for q in raw_queries.split(",") if q.strip()]
+    else:
+        # Default fallback search terms that are likely to yield interesting products
+        additional_queries = [
+            "best sellers",
+            "top rated",
+            "trending gadgets",
+            "popular products",
+            "Amazon deals",
+            "tech accessories",
+            "kitchen essentials",
+        ]
+
+    # Combine category-derived queries with additional queries
+    search_queries = category_queries + additional_queries
+
+    # Determine if verbose debugging is enabled
     debug_mode = os.getenv("DEBUG") or os.getenv("VERBOSE")
     if debug_mode:
         print(f"[DEBUG] Using RapidAPI host: {host}")
-        print(f"[DEBUG] Categories: {categories}")
+        print(f"[DEBUG] Search queries: {search_queries}")
         print(f"[DEBUG] Region/language: {region}/{language}")
-        print(f"[DEBUG] Used ASINs count: {len(used_asins)}")
 
-    # Try to fetch a random trending product.  We'll attempt to get an
-    # unused product first; if none are available, we allow repeats.
-    product_entry = fetch_random_trending_product(
-        categories, region, language, rapidapi_key, host, used_asins
-    )
-    if product_entry is None:
-        # Try again without excluding used ASINs in case all available
-        # products have already been used.  This ensures at least one
-        # product is returned if the API supports the endpoint.
-        product_entry = fetch_random_trending_product(
-            categories, region, language, rapidapi_key, host, set()
-        )
-
-    # If the ranking endpoints returned nothing, fall back to a search.
-    if product_entry is None:
-        if debug_mode:
-            print("[DEBUG] No products returned from trending endpoints; falling back to search")
-        # Determine search queries from the environment.  If not provided,
-        # use a default list of generic queries that should return popular
-        # or interesting products.  Users can override SEARCH_QUERIES to
-        # customise the types of items they want to feature.
-        raw_queries = os.getenv("SEARCH_QUERIES", "").strip()
-        if raw_queries:
-            queries = [q.strip() for q in raw_queries.split(",") if q.strip()]
-        else:
-            queries = [
-                "best sellers",
-                "top rated",
-                "trending gadgets",
-                "new release",
-                "popular products",
-                "Amazon deals",
-                "tech accessories",
-                "kitchen essentials",
-            ]
-        product_entry = fetch_search_product(
-            queries, region, language, rapidapi_key, host
-        )
-
-        if debug_mode and product_entry:
-            asin_dbg = (
-                product_entry.get("asin")
-                or product_entry.get("asin13")
-                or product_entry.get("asin_10")
-            )
-            print(f"[DEBUG] Selected product via search (ASIN={asin_dbg})")
-
+    # Perform a search to find a product.  Randomise the queries list to
+    # diversify results across runs.
+    product_entry = fetch_search_product(search_queries, region, language, rapidapi_key, host)
     if product_entry is None:
         raise RuntimeError(
-            "Could not find a trending or searchable product. Try expanding the CATEGORY_LIST or SEARCH_QUERIES, "
+            "Could not find a product using the search API. Try expanding the CATEGORY_LIST or SEARCH_QUERIES, "
             "or check your RapidAPI subscription and host configuration."
         )
 
@@ -643,7 +609,20 @@ def main() -> None:
     if not asin:
         raise RuntimeError("Selected product does not have a valid ASIN.")
 
-    # Add the ASIN to the used set and persist it for future runs
+    if debug_mode:
+        print(f"[DEBUG] Selected product via search (ASIN={asin})")
+
+    # Load or initialise the used ASINs set to avoid repeats across runs
+    used_file = os.getenv("USED_ASINS_FILE", "used_asins.json")
+    used_asins: set = set()
+    if os.path.exists(used_file):
+        try:
+            with open(used_file, "r") as f:
+                used_asins = set(json.load(f))
+        except Exception:
+            used_asins = set()
+
+    # Add the ASIN to the used set and persist
     used_asins.add(asin)
     try:
         with open(used_file, "w") as f:
@@ -651,27 +630,20 @@ def main() -> None:
     except Exception:
         pass
 
-    # Fetch additional product details to obtain title, image and canonical URL
-    title, image_url, product_url = fetch_product_details(
-        asin, region, rapidapi_key, host
-    )
+    # Fetch additional product details
+    title, image_url, product_url = fetch_product_details(asin, region, rapidapi_key, host)
 
-    # Fetch a few top reviews to enrich the narration
-    reviews = fetch_top_reviews(
-        asin, region, language, rapidapi_key, host, max_reviews=3
-    )
+    # Fetch top reviews
+    reviews = fetch_top_reviews(asin, region, language, rapidapi_key, host, max_reviews=3)
 
-    # Build the script for the voiceover and description.  Include an
-    # affiliate tag if provided; otherwise use the canonical product URL.
+    # Build voiceover text and description
     affiliate_tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
-    if affiliate_tag:
-        affiliate_link = f"https://www.amazon.com/dp/{asin}?tag={affiliate_tag}"
-    else:
-        affiliate_link = product_url
-    tagline = f"🔥 Trending Amazon find: {title}!"
-    description_lines = [
-        f"Check out {title} – it's trending right now on Amazon!"
-    ]
+    affiliate_link = (
+        f"https://www.amazon.com/dp/{asin}?tag={affiliate_tag}"
+        if affiliate_tag else product_url
+    )
+    tagline = f"🔥 Check out this Amazon find: {title}!"
+    description_lines = [f"Check out {title} – it's a great find on Amazon!"]
     if reviews:
         description_lines.append("")
         description_lines.append("Here's what customers are saying:")
@@ -685,19 +657,17 @@ def main() -> None:
         description_lines.append(f"👉 Find it here: {affiliate_link}")
     description = "\n".join(description_lines)
 
-    # Prepare output directory and file paths
+    # Prepare output directories and file paths
     output_dir = os.path.join(os.getcwd(), "output")
     os.makedirs(output_dir, exist_ok=True)
     image_path = os.path.join(output_dir, "product.jpg")
     audio_path = os.path.join(output_dir, "voice.mp3")
 
-    # Download the product image (or placeholder if necessary)
+    # Download image and generate voiceover
     download_image(image_url, image_path)
-
-    # Generate the voiceover audio asynchronously
     asyncio.run(generate_voiceover(description, audio_path))
 
-    # Create the final vertical video and save it to the output directory
+    # Create the video
     create_video(title, image_path, audio_path, tagline, output_dir)
     print(f"Successfully created video for {title} ({asin})")
 
