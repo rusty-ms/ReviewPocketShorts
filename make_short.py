@@ -100,12 +100,15 @@ def create_text_image(
 
 def main() -> None:
     # Read environment variables or use defaults
-    product_title = os.getenv("PRODUCT_TITLE", "Example Product")
-    product_image_url = os.getenv(
-        "PRODUCT_IMAGE_URL",
-        "https://upload.wikimedia.org/wikipedia/commons/6/6b/Placeholder_image.png",
+    # Use environment variables if provided; otherwise fall back to sensible defaults.
+    # Note: os.getenv returns an empty string if the variable is set but blank, so
+    # we explicitly use the "or" operator to handle blank values.
+    product_title = os.getenv("PRODUCT_TITLE") or "Example Product"
+    product_image_url = (
+        os.getenv("PRODUCT_IMAGE_URL")
+        or "https://upload.wikimedia.org/wikipedia/commons/6/6b/Placeholder_image.png"
     )
-    product_link = os.getenv("PRODUCT_LINK", "")
+    product_link = os.getenv("PRODUCT_LINK") or ""
     tagline = f"\U0001F525 Trending on Amazon: {product_title}!"
     description = tagline
     if product_link:
