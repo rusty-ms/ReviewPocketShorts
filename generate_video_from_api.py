@@ -71,50 +71,68 @@ def fetch_product_details(
     asin: str, region: str, rapidapi_key: str, host: str
 ) -> Tuple[str, str, str]:
     """
-    Fetch product details from the Real‑Time Amazon Data API.
+    Fetch detailed information about a product from the Real‑Time Amazon Data API.
+
+    The v2 API exposes a ``product-details`` endpoint which accepts the
+    product ASIN and optional ``country`` parameter.  This function
+    invokes that endpoint and extracts the product's title, the first
+    image URL, and its canonical Amazon URL.  If the API returns an
+    unexpected structure, a ``ValueError`` is raised.
 
     Parameters
     ----------
     asin : str
-        The Amazon Standard Identification Number for the product.
+        The product's Amazon Standard Identification Number.
     region : str
-        The Amazon marketplace region (e.g. ``US``, ``GB``, ``DE``).
+        Marketplace region code (e.g. ``US``).  Mapped to the ``country``
+        parameter accepted by the API.
     rapidapi_key : str
-        Your RapidAPI key used for authentication.
+        RapidAPI authentication key.
     host : str
-        The RapidAPI host for the Real‑Time Amazon Data API.
+        RapidAPI host (e.g. ``real-time-amazon-data.p.rapidapi.com``).
 
     Returns
     -------
     Tuple[str, str, str]
-        A tuple containing the product title, a primary image URL, and
-        the canonical product URL on Amazon.  Raises an exception if
-        the API request fails or returns unexpected data.
+        A tuple of (title, image_url, product_url).
     """
-    url = f"https://{host}/product"
+    # v2 Product Details endpoint – see RapidAPI docs.  Previously we
+    # called ``/product``, which is deprecated and returns 404s for
+    # OpenWeb Ninja.  The correct path is ``/product-details``.
+    url = f"https://{host}/product-details"
     headers = {
-        "X-RapidAPI-Key": os.environ["RAPIDAPI_KEY"],"c5730ab206msh1db240e2bf9c639p171e15jsne3db9c3494aa")
-        "X-RapidAPI-Host": os.environ.get("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
+        "X-RapidAPI-Key": rapidapi_key,
+        "X-RapidAPI-Host": host,
     }
     params = {
         "asin": asin,
-        "region": region,
+        # The API uses ``country`` rather than ``region`` to select the
+        # marketplace.  Pass through the caller-provided region value.
+        "country": region,
     }
-    response = requests.get(url, headers=headers, params=params, timeout=30)
-    response.raise_for_status()
-    data = response.json()
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
     try:
-        title: str = data["product_title"]
-        photo = data["product_photo"]
-        if isinstance(photo, list):
-            image_url = photo[0]
+        # v2 API returns ``product_title`` and either ``product_photo`` or
+        # ``product_photos``.  Extract the first available image.
+        title: str = data.get("product_title") or data.get("title")
+        # Image may be under ``product_photo`` (string or list) or
+        # ``product_photos`` (list).  Consolidate these cases.
+        photo_field = data.get("product_photo") or data.get("product_photos")
+        if isinstance(photo_field, list):
+            image_url = photo_field[0]
         else:
-            image_url = photo
-        product_url: str = data.get("product_url", f"https://www.amazon.com/dp/{asin}")
+            image_url = photo_field
+        # Provide a fallback URL if the API omits ``product_url``.
+        product_url: str = data.get("product_url") or f"https://www.amazon.com/dp/{asin}"
+        if not title or not image_url:
+            raise ValueError("Missing title or image in API response")
         return title, image_url, product_url
     except Exception as exc:
+        # Include a snippet of the response for debugging.
         raise ValueError(
-            f"Unexpected response format when fetching product {asin}: {json.dumps(data)[:500]}"
+            f"Unexpected response when fetching product details for {asin}: {json.dumps(data)[:500]}"
         ) from exc
 
 
@@ -127,23 +145,27 @@ def fetch_top_reviews(
     max_reviews: int = 3,
 ) -> List[str]:
     """
-    Fetch top customer reviews for a product.
+    Retrieve top customer reviews for a product via the v2 API.
 
-    This function calls the ``/v1/products/reviews`` endpoint to retrieve
-    reviews for the given ASIN.  It returns up to ``max_reviews`` review
-    bodies.  If the API fails or returns no reviews, an empty list is
+    The Real‑Time Amazon Data API exposes a ``product-reviews`` endpoint
+    that returns reviews for the given ASIN.  This function calls that
+    endpoint and extracts up to ``max_reviews`` review bodies.  If the
+    API request fails or no reviews are available, an empty list is
     returned.
 
     Parameters
     ----------
     asin : str
-        The product ASIN to fetch reviews for.
+        Product ASIN for which to fetch reviews.
     region : str
-        Marketplace region code (e.g. ``US``).
+        Marketplace region code (e.g. ``US``).  Used for the ``country``
+        parameter.
     language : str
-        Two‑letter language code for the response (e.g. ``en``).
+        Language code (e.g. ``en``).  The v2 API does not currently
+        support language filtering on the reviews endpoint, but this
+        parameter is kept for forward compatibility.
     rapidapi_key : str
-        RapidAPI key for authentication.
+        RapidAPI authentication key.
     host : str
         RapidAPI host for the Real‑Time Amazon Data API.
     max_reviews : int, optional
@@ -152,39 +174,51 @@ def fetch_top_reviews(
     Returns
     -------
     list of str
-        A list of review body strings.
+        List of review text snippets.
     """
-    url = f"https://{host}/v1/products/reviews"
+    # v2 Reviews endpoint uses the ``product-reviews`` path.  See
+    # https://rapidapi.com/letscrape-6bRBa3QguO5/api/real-time-amazon-data for details.
+    url = f"https://{host}/product-reviews"
     headers = {
         "X-RapidAPI-Key": rapidapi_key,
         "X-RapidAPI-Host": host,
+        # Some providers require a Content-Type even for GET requests.
+        "Content-Type": "application/json",
     }
+    # Compose query parameters.  We request page 1 sorted by TOP_REVIEWS,
+    # but other sort orders like MOST_RECENT are available.  Additional
+    # filters (verified_purchases_only, star_rating, etc.) are omitted
+    # for simplicity.
     params = {
         "asin": asin,
         "country": region,
-        "language": language,
         "page": 1,
+        "sort_by": "TOP_REVIEWS",
     }
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        resp.raise_for_status()
     except Exception:
         return []
-    data = response.json()
-    reviews = []
-    # The structure of the response may vary; attempt to extract review text.
-    try:
-        results = data.get("reviews") or data.get("data", {}).get("reviews", [])
-        for review in results:
-            # Attempt multiple keys for the review body
-            text = review.get("review") or review.get("review_body") or review.get("content")
-            if text:
-                reviews.append(text.strip())
-            if len(reviews) >= max_reviews:
-                break
-        return reviews
-    except Exception:
+    data = resp.json()
+    reviews: List[str] = []
+    # Reviews may be returned under ``reviews`` or nested under ``data``.
+    results = data.get("reviews") or data.get("data", {}).get("reviews", [])
+    if not isinstance(results, list):
         return []
+    for review in results:
+        # Fields differ by provider: ``review``, ``review_body``, ``content``
+        text = (
+            review.get("review")
+            or review.get("review_body")
+            or review.get("content")
+            or review.get("body")
+        )
+        if text:
+            reviews.append(text.strip())
+        if len(reviews) >= max_reviews:
+            break
+    return reviews
 
 
 def fetch_random_trending_product(
@@ -228,47 +262,49 @@ def fetch_random_trending_product(
     random_categories = categories[:]
     random.shuffle(random_categories)
     for category in random_categories:
-        # The ranking endpoints may live under two different path patterns
-        # depending on the API provider.  Try both patterns.  The first
-        # corresponds to OpenWeb Ninja's ``/api/v1/amazon/rankings/movers-shakers``
-        # and the second to APIcalls.io's ``/v1/rankings/movers-shakers``.
-        for path in ["/api/v1/amazon/rankings/movers-shakers", "/v1/rankings/movers-shakers"]:
-            url = f"https://{host}{path}"
-            headers = {
-                "X-RapidAPI-Key": rapidapi_key,
-                "X-RapidAPI-Host": host,
-            }
-            params = {
-                "category": category,
-                "country": region,
-                "language": language,
-                "page": 1,
-            }
-            try:
-                response = requests.get(url, headers=headers, params=params, timeout=30)
-                response.raise_for_status()
-            except Exception:
-                continue
-            data = response.json()
-            products = (
-                data.get("results")
-                or data.get("data", {}).get("results")
-                or data.get("data", {}).get("products")
-                or []
+        # In the v2 API, the ``best-sellers`` endpoint supports multiple
+        # list types, including MOVERS_AND_SHAKERS for trending products.
+        url = f"https://{host}/best-sellers"
+        headers = {
+            "X-RapidAPI-Key": rapidapi_key,
+            "X-RapidAPI-Host": host,
+        }
+        params = {
+            "category": category,
+            # Choose the movers & shakers list to get trending products.
+            "type": "MOVERS_AND_SHAKERS",
+            "page": 1,
+            "country": region,
+        }
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            resp.raise_for_status()
+        except Exception:
+            # Move on to next category if the request fails.
+            continue
+        data = resp.json()
+        # The API may return products under different keys depending on provider.
+        products = (
+            data.get("results")
+            or data.get("data", {}).get("products")
+            or data.get("data", {}).get("results")
+            or data.get("products")
+            or []
+        )
+        if not products:
+            continue
+        random.shuffle(products)
+        for product in products:
+            # Determine the ASIN field.  Some providers use different keys.
+            asin = (
+                product.get("asin")
+                or product.get("asin13")
+                or product.get("asin_10")
+                or product.get("product_id")
             )
-            if not products:
-                continue
-            random.shuffle(products)
-            for product in products:
-                asin = (
-                    product.get("asin")
-                    or product.get("asin13")
-                    or product.get("asin_10")
-                    or None
-                )
-                if asin and asin not in used_asins:
-                    return product
-        # If both patterns fail, try the next category
+            if asin and asin not in used_asins:
+                return product
+        # If no unused product was found in this category, continue to next.
     return None
 
 
