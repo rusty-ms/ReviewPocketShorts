@@ -93,8 +93,8 @@ def fetch_product_details(
     """
     url = f"https://{host}/product"
     headers = {
-        "X-RapidAPI-Key": rapidapi_key,
-        "X-RapidAPI-Host": host,
+        "X-RapidAPI-Key": os.environ["RAPIDAPI_KEY"],"c5730ab206msh1db240e2bf9c639p171e15jsne3db9c3494aa")
+        "X-RapidAPI-Host": os.environ.get("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
     }
     params = {
         "asin": asin,
