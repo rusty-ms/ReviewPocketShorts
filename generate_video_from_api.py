@@ -42,6 +42,18 @@ RAW_PATH   = os.path.join(OUTPUT_DIR, "raw.mp4")
 FINAL_PATH = os.path.join(OUTPUT_DIR, "video.mp4")
 THUMBNAIL  = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
 
+CAPTION_FONT_SIZE  = int(os.getenv("CAPTION_FONT_SIZE", 36))   # 36–48 looks good
+CAPTION_MARGIN_V   = int(os.getenv("CAPTION_MARGIN_V", 120))   # move text up from bottom
+CAPTION_ALIGNMENT  = int(os.getenv("CAPTION_ALIGNMENT", 2))    # 2=bottom‑center, 8=top‑center, 5=center
+CAPTION_OUTLINE    = int(os.getenv("CAPTION_OUTLINE", 2))
+CAPTION_BOX_ALPHA  = os.getenv("CAPTION_BOX_ALPHA", "64")      # 00–FF (hex, AA in &HAA..&)
+
+MAX_REVIEWS              = int(os.getenv("MAX_REVIEWS", 2))
+REVIEW_SNIPPET_CHARS     = int(os.getenv("REVIEW_SNIPPET_CHARS", 160))
+INTRO_PREFIX             = os.getenv("INTRO_PREFIX", "{title}. Quick takeaways from reviews:")
+OUTRO_TEXT               = os.getenv("OUTRO_TEXT", "Check the link for details and current price.")
+INCLUDE_AFFILIATE_LINE   = os.getenv("INCLUDE_AFFILIATE_LINE", "1") == "1"
+
 DEFAULT_QUERIES = [
     "books","electronics","home kitchen","toys games","beauty",
     "office products","clothing shoes jewelry","sports outdoors",
@@ -329,16 +341,23 @@ def create_thumbnail(hero_url: str, title: str, brand: Optional[str], out_path: 
 # -------------------------------
 # Build narration script
 # -------------------------------
-def build_script(title: str, reviews: List[str], product_url: str) -> str:
-    lines = [f"{title}. Quick takeaways from top reviews:"]
-    for r in reviews[:3]:
+def build_script(title: str, reviews: list[str], product_url: str) -> str:
+    intro = INTRO_PREFIX.replace("{title}", title)
+    lines = [intro]
+
+    for r in reviews[:MAX_REVIEWS]:
+        r = " ".join(r.split())
+        if len(r) > REVIEW_SNIPPET_CHARS:
+            r = r[:REVIEW_SNIPPET_CHARS - 1] + "…"
         lines.append(r)
+
     tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
-    if tag:
+    if INCLUDE_AFFILIATE_LINE and tag:
         sep = "&" if "?" in product_url else "?"
         lines.append(f"Full details and current price: {product_url}{sep}tag={tag}")
     else:
-        lines.append("Check the link for details and current price.")
+        lines.append(OUTRO_TEXT)
+
     return " ".join(lines)
 
 # -------------------------------
@@ -381,7 +400,17 @@ def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path:
     # burn subtitles
     if os.path.exists(srt_path):
         # Use libass subtitles filter; force style for readability
-        style = "Fontsize=42,OutlineColour=&H80000000&,BorderStyle=3,Outline=2,Shadow=0,PrimaryColour=&H00FFFFFF&"
+        # ASS/SSA color format: &HAABBGGRR&  (AA = alpha)
+    style = (
+        f"Fontname=DejaVu Sans,"
+        f"Fontsize={CAPTION_FONT_SIZE},"
+        f"BorderStyle=3,Outline={CAPTION_OUTLINE},Shadow=0,"
+        f"PrimaryColour=&H00FFFFFF&,"        # white
+        f"OutlineColour=&H80000000&,"        # semi‑transparent black outline
+        f"BackColour=&H{CAPTION_BOX_ALPHA}000000&,"  # translucent black caption box
+        f"Alignment={CAPTION_ALIGNMENT},"
+        f"MarginV={CAPTION_MARGIN_V}"
+    )
         vf += f";[vout]subtitles={SRT_PATH}:force_style='{style}'[vfinal]"
         vmap = "[vfinal]"
     else:
