@@ -160,6 +160,53 @@ def fetch_top_reviews(asin: str, country: str, max_reviews: int = 3) -> List[str
 # TTS + captions (fixed for edge-tts)
 # -------------------------------
 
+def vtt_to_srt(vtt_path: str, srt_path: str) -> None:
+    """
+    Minimal WebVTT → SRT converter compatible with edge-tts output.
+    """
+    with open(vtt_path, "r", encoding="utf-8") as f:
+        lines = [ln.rstrip("\n") for ln in f]
+
+    # Split into cue blocks by blank lines
+    entries, buf = [], []
+    for ln in lines:
+        if ln.strip() == "" and buf:
+            entries.append(buf); buf = []
+        else:
+            buf.append(ln)
+    if buf:
+        entries.append(buf)
+
+    idx = 1
+    out = []
+    ts_re = re.compile(r"(?P<s>\d+:\d+:\d+\.\d+)\s*-->\s*(?P<e>\d+:\d+:\d+\.\d+)")
+
+    def fix_ts(ts: str) -> str:
+        # 00:00:01.234 -> 00:00:01,234 (SRT uses comma)
+        return ts.replace(".", ",")
+
+    for chunk in entries:
+        times = None
+        text_lines = []
+        for ln in chunk:
+            if "-->" in ln:
+                m = ts_re.search(ln)
+                if m:
+                    s = fix_ts(m.group("s"))
+                    e = fix_ts(m.group("e"))
+                    times = f"{s} --> {e}"
+            elif ln and not ln.startswith("WEBVTT"):
+                text_lines.append(ln)
+        if times and text_lines:
+            out.append(str(idx))
+            out.append(times)
+            out.extend(text_lines)
+            out.append("")  # blank line
+            idx += 1
+
+    with open(srt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
+
 
 def _ticks_to_vtt_ts(ticks: int) -> str:
     # edge-tts offsets/durations are in 100-ns ticks (10,000,000 per second)
