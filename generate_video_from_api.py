@@ -48,7 +48,7 @@ DEFAULT_QUERIES = [
 ]
 
 # Royalty‑free background music (Pixabay)
-BG_MUSIC_URL  = "https://cdn.pixabay.com/download/audio/2023/03/01/audio_4c6a7f9b8f.mp3?filename=corporate-technology-123447.mp3"
+#BG_MUSIC_URL  = "https://cdn.pixabay.com/download/audio/2023/03/01/audio_4c6a7f9b8f.mp3?filename=corporate-technology-123447.mp3"
 BG_MUSIC_PATH = os.path.join(ASSETS_DIR, "music.mp3")
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
