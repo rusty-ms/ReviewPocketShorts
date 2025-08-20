@@ -1,49 +1,68 @@
-name: Amazon Review Bot
+name: Amazon Video Bot
 
 on:
-  schedule:
-    - cron: "0 14 * * *"  # Daily at 2PM UTC
   workflow_dispatch:
+  schedule:
+    # Runs every day at 14:00 UTC (08:00 America/Chicago)
+    - cron: "0 14 * * *"
 
 jobs:
-  run-bot:
+  build-and-render:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # ====== Required ======
+      RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+
+      # ====== Optional but recommended ======
+      RAPIDAPI_HOST: real-time-amazon-data.p.rapidapi.com
+      REGION: US
+      AMAZON_AFFILIATE_TAG: ${{ secrets.AMAZON_AFFILIATE_TAG }}
+
+      # ====== Debug / tuning ======
+      DEBUG: "1"                  # prints API URLs, headers (key masked), etc.
+      # CATEGORY_LIST: "books,electronics,home-kitchen,toys-games,beauty"
+      SEARCH_QUERIES: "books,electronics,home kitchen,toys games,beauty,office products,clothing shoes jewelry,sports outdoors,best sellers,trending gadgets,top rated,new release"
+      TTS_VOICE: "en-US-JennyNeural"
 
     steps:
-
-
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install system dependencies
+      - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libsndfile1
+          sudo apt-get install -y ffmpeg
 
-      - name: Install Python dependencies
+      - name: Install Python deps
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install requests pillow moviepy edge-tts numpy
 
-      - name: Run the bot
-        env:
-          # RapidAPI authentication for Real‑Time Amazon Data
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
-          # Optional: specify categories to pick from (comma‑separated slugs).  If omitted,
-          # the script will use a default list of popular categories.  See
-          # generate_video_from_api.py for details.
-          CATEGORY_LIST: "books,electronics,home-kitchen,toys-games,beauty,office-products,clothing-shoes-jewelry,sports-outdoors"
-          SEARCH_QUERIES: "best sellers,trending gadgets,top rated,new release"
-          # Optional: Amazon affiliate tag for link tracking
-          AMAZON_AFFILIATE_TAG: ${{ secrets.AMAZON_AFFILIATE_TAG }}
-          # Optional: customise the marketplace region and language
-          REGION: "US"
-          LANGUAGE: "en"
-          DEBUG: "1"
+      - name: Show repo status
+        run: |
+          echo "Commit: $GITHUB_SHA"
+          ls -la
+          python -V
+
+      - name: Run video generator
         run: |
           python generate_video_from_api.py
+
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: short-video
+          path: |
+            output/video.mp4
+            output/*.mp3
+            output/*.vtt
+            output/raw.mp4
+          if-no-files-found: warn
