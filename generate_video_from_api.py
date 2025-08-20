@@ -1,479 +1,447 @@
 #!/usr/bin/env python3
 """
-Amazon Video Bot
-Version: 2025-08-20d
-Features:
-- Fetch Amazon product via RapidAPI
-- Download product images
-- Generate TTS narration + subtitles (edge-tts)
-- Burned-in captions synced to TTS
-- Background music (royalty-free, auto-downloaded if missing)
-- Export vertical MP4 ready for YouTube Shorts
-- Auto-generate branded YouTube thumbnail (1280x720)
+Amazon Video Bot (ffmpeg edition)
+Version: 2025-08-20e
 """
 
 import os
 import re
 import io
 import sys
+import json
+import shlex
 import random
 import asyncio
+import subprocess
 from typing import Tuple, List, Optional
 
 import requests
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from moviepy.editor import (
-    ImageClip, concatenate_videoclips, AudioFileClip,
-    VideoFileClip, TextClip, CompositeVideoClip, CompositeAudioClip
-)
 
 # -------------------------------
-# Config
+# Config / Env
 # -------------------------------
-VERSION = "2025-08-20d"
+VERSION = "2025-08-20e"
+COMMIT = (os.getenv("GITHUB_SHA") or "")[:7] or "<local>"
+
 RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
-COUNTRY = os.getenv("REGION", "US")
-VOICE = os.getenv("TTS_VOICE", "en-US-JennyNeural")
-#BRAND_NAME = os.getenv("BRAND_NAME", "").strip() or None
-BRAND_NAME = "Review Pocket Shorts"
+COUNTRY       = os.getenv("REGION", "US")
+VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
+BRAND_NAME    = os.getenv("BRAND_NAME", "").strip() or None
+DEBUG         = os.getenv("DEBUG", "0") == "1"
+
 OUTPUT_DIR = "output"
 ASSETS_DIR = "assets"
-THUMBNAIL_PATH = os.path.join(OUTPUT_DIR, "thumbnail.jpg")  # 1280x720
-RAW_VIDEO_PATH = os.path.join(OUTPUT_DIR, "raw.mp4")
-FINAL_VIDEO_PATH = os.path.join(OUTPUT_DIR, "video.mp4")
 AUDIO_PATH = os.path.join(OUTPUT_DIR, "voice.mp3")
-VTT_PATH = os.path.join(OUTPUT_DIR, "voice.vtt")
+VTT_PATH   = os.path.join(OUTPUT_DIR, "voice.vtt")
+SRT_PATH   = os.path.join(OUTPUT_DIR, "voice.srt")
+RAW_PATH   = os.path.join(OUTPUT_DIR, "raw.mp4")
+FINAL_PATH = os.path.join(OUTPUT_DIR, "video.mp4")
+THUMBNAIL  = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
 
-# Search terms (can also override via SEARCH_QUERIES env)
 DEFAULT_QUERIES = [
-    "books", "electronics", "home kitchen", "toys games", "beauty",
-    "office products", "clothing shoes jewelry", "sports outdoors",
-    "best sellers", "trending gadgets", "top rated", "new release"
+    "books","electronics","home kitchen","toys games","beauty",
+    "office products","clothing shoes jewelry","sports outdoors",
+    "best sellers","trending gadgets","top rated","new release"
 ]
 
-# Background music (royalty‑free from Pixabay)
-BG_MUSIC_URL = "https://cdn.pixabay.com/download/audio/2023/03/01/audio_4c6a7f9b8f.mp3?filename=corporate-technology-123447.mp3"
+# Royalty‑free background music (Pixabay)
+BG_MUSIC_URL  = "https://cdn.pixabay.com/download/audio/2023/03/01/audio_4c6a7f9b8f.mp3?filename=corporate-technology-123447.mp3"
 BG_MUSIC_PATH = os.path.join(ASSETS_DIR, "music.mp3")
 
+UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
 # -------------------------------
-# Helpers / Debug
+# Small utils
 # -------------------------------
-def mask_key(key: Optional[str]) -> str:
-    if not key:
-        return "<missing>"
-    return key if len(key) < 9 else f"{key[:4]}...{key[-4:]}"
+def mask_key(k: Optional[str]) -> str:
+    if not k: return "<missing>"
+    return k if len(k) < 9 else f"{k[:4]}...{k[-4:]}"
 
-def dprint(*args):
-    if os.getenv("DEBUG", "0") == "1":
-        print("[DEBUG]", *args)
+def log(*a):
+    print(*a)
 
-def req(method: str, url: str, *, headers: dict, params: dict, timeout: int = 30) -> requests.Response:
-    dprint(f"{method} {url} params={params}")
-    safe_headers = {"X-RapidAPI-Key": "***", "X-RapidAPI-Host": headers.get("X-RapidAPI-Host")}
-    dprint(f"Headers: {safe_headers}")
-    r = requests.request(method, url, headers=headers, params=params, timeout=timeout)
-    try:
-        r.raise_for_status()
-        return r
-    except requests.HTTPError as e:
-        print("HTTP ERROR:", e)
-        print("URL:", r.url)
-        print("STATUS:", r.status_code)
-        try:
-            print("BODY:", r.text[:500])
-        except Exception:
-            pass
-        raise
+def dprint(*a):
+    if DEBUG: print("[DEBUG]", *a)
 
-def ensure_assets():
+def run(cmd: List[str]) -> None:
+    dprint("RUN:", " ".join(shlex.quote(c) for c in cmd))
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0:
+        print(proc.stdout)
+        print(proc.stderr)
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}")
+
+def ensure_dirs():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(ASSETS_DIR, exist_ok=True)
+
+def ensure_bg_music():
     if not os.path.exists(BG_MUSIC_PATH):
-        print("[INFO] Downloading royalty-free background music...")
+        log("[INFO] Downloading royalty‑free background music…")
         r = requests.get(BG_MUSIC_URL, stream=True, timeout=60)
         r.raise_for_status()
         with open(BG_MUSIC_PATH, "wb") as f:
             for chunk in r.iter_content(8192):
                 f.write(chunk)
-        print(f"[INFO] Saved background track to {BG_MUSIC_PATH}")
+        log(f"[INFO] Saved {BG_MUSIC_PATH}")
 
 # -------------------------------
-# RapidAPI calls (v2)
+# RapidAPI (v2)
 # -------------------------------
-def search_random_product(queries: List[str], country: str) -> str:
-    """
-    Try provider-specific search paths until one works:
-      - /search (OpenWebNinja)
-      - /v1/products/search (APICalls)
-      - /products/search (some mirrors)
-    Returns an ASIN.
-    """
-    search_paths = ["/search", "/v1/products/search", "/products/search"]
+def req(method: str, url: str, params: dict) -> dict:
     headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
+    dprint("GET", url, "params=", params, "headers=", {"X-RapidAPI-Key":"***","X-RapidAPI-Host":RAPIDAPI_HOST})
+    r = requests.request(method, url, headers=headers, params=params, timeout=30)
+    if r.status_code >= 400:
+        print("HTTP ERROR:", r.status_code, r.url, r.text[:500])
+        r.raise_for_status()
+    try:
+        return r.json()
+    except Exception:
+        return {}
 
-    shuffled_queries = queries[:]
-    random.shuffle(shuffled_queries)
+def search_random_product(queries: List[str], country: str) -> str:
+    search_paths = ["/search", "/v1/products/search", "/products/search"]
+    qs = queries[:]
+    random.shuffle(qs)
 
     last_err = None
-    for q in shuffled_queries:
-        for path in search_paths:
-            url = f"https://{RAPIDAPI_HOST}{path}"
-            params = {"query": q, "country": country, "page": 1}
+    for q in qs:
+        for p in search_paths:
+            url = f"https://{RAPIDAPI_HOST}{p}"
             try:
-                r = req("GET", url, headers=headers, params=params)
+                js = req("GET", url, {"query": q, "country": country, "page": 1})
             except Exception as e:
                 last_err = e
                 continue
-
-            js = {}
-            try:
-                js = r.json()
-            except Exception:
-                pass
-
-            products = (
-                (js.get("data") or {}).get("products")
-                or js.get("products")
-                or js.get("data")  # some providers return list directly
-                or []
-            )
-
+            products = (js.get("data") or {}).get("products") or js.get("products") or js.get("data") or []
             if not products:
-                dprint(f"No products for query='{q}' via path '{path}'")
+                dprint(f"No products for q='{q}' via '{p}'")
                 continue
-
-            asin = None
             for item in products:
                 asin = item.get("asin") or item.get("ASIN") or item.get("id")
                 if asin:
-                    break
-            if asin:
-                dprint(f"Selected product via search (ASIN={asin}) using path '{path}' and query '{q}'")
-                return asin
-
+                    dprint(f"Selected ASIN={asin} via '{p}' q='{q}'")
+                    return asin
     if last_err:
         raise RuntimeError(f"Search failed: {last_err}")
-    raise RuntimeError("Search returned no products across all paths/queries")
+    raise RuntimeError("Search returned no products")
 
 def fetch_product_details(asin: str, country: str) -> Tuple[str, str, str, List[str]]:
-    """
-    /product-details (params: asin, country)
-    Returns (title, hero_image_url, product_url, all_photo_urls)
-    """
     url = f"https://{RAPIDAPI_HOST}/product-details"
-    headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
-    params = {"asin": asin, "country": country}
-
-    r = req("GET", url, headers=headers, params=params)
-    payload = r.json()
-    data = payload.get("data") or {}
+    js = req("GET", url, {"asin": asin, "country": country})
+    data = js.get("data") or {}
     if not data:
         raise RuntimeError(f"No product details for ASIN {asin}")
-
     title = data.get("product_title") or "Untitled"
     product_url = data.get("product_url") or f"https://www.amazon.com/dp/{asin}"
     photos = data.get("product_photos") or []
-    hero = photos[0] if photos else None
-    if not hero:
-        raise RuntimeError(f"No image in product details for ASIN {asin}")
-    return title, hero, product_url, photos
+    if not photos: raise RuntimeError("No product photos")
+    return title, photos[0], product_url, photos
 
 def fetch_top_reviews(asin: str, country: str, max_reviews: int = 3) -> List[str]:
-    """
-    /product-reviews (params: asin, country, page=1, sort_by=TOP_REVIEWS)
-    Returns a list of plaintext review snippets.
-    """
     url = f"https://{RAPIDAPI_HOST}/product-reviews"
-    headers = {"X-RapidAPI-Key": RAPIDAPI_KEY, "X-RapidAPI-Host": RAPIDAPI_HOST}
-    params = {"asin": asin, "country": country, "page": 1, "sort_by": "TOP_REVIEWS"}
-
-    r = req("GET", url, headers=headers, params=params)
-    js = r.json()
+    js = req("GET", url, {"asin": asin, "country": country, "page": 1, "sort_by": "TOP_REVIEWS"})
     items = (js.get("data") or {}).get("reviews", []) or js.get("reviews", []) or []
     out = []
     for it in items:
-        txt = it.get("review_text") or it.get("body") or ""
+        txt = (it.get("review_text") or it.get("body") or "").strip()
         txt = " ".join(txt.split())
         if txt:
             out.append(txt[:300] + ("..." if len(txt) > 300 else ""))
-        if len(out) >= max_reviews:
-            break
+        if len(out) >= max_reviews: break
     return out
 
 # -------------------------------
 # TTS + captions
 # -------------------------------
-async def synthesize_tts_with_subs(text, voice=VOICE, out_audio=AUDIO_PATH, out_vtt=VTT_PATH):
-    """
-    Generate voice and WebVTT subtitle file using edge-tts.
-    """
-    os.makedirs(os.path.dirname(out_audio), exist_ok=True)
-    communicate = edge_tts.Communicate(text, voice=voice)
-    await communicate.save(out_audio)
-    await communicate.save(out_vtt, format="vtt")
+async def synthesize_tts_with_subs(text: str, voice: str, out_audio: str, out_vtt: str):
+    com = edge_tts.Communicate(text, voice=voice)
+    await com.save(out_audio)
+    await com.save(out_vtt, format="vtt")
     return out_audio, out_vtt
 
-def parse_vtt(vtt_path: str):
+def vtt_to_srt(vtt_path: str, srt_path: str) -> None:
     """
-    Parse WebVTT captions into [(start, end, text), ...]
+    Quick VTT -> SRT converter good enough for edge-tts output.
     """
-    pattern = re.compile(r"(\d+):(\d+):(\d+\.\d+)")
-    captions = []
     with open(vtt_path, "r", encoding="utf-8") as f:
-        lines = f.read().splitlines()
-    start, end, buf = None, None, []
-    for line in lines:
-        if "-->" in line:
-            times = line.split("-->")
-            s, e = times[0].strip(), times[1].strip().split(" ")[0]
-            def parse(ts):
-                h, m, sf = pattern.match(ts).groups()
-                return int(h)*3600 + int(m)*60 + float(sf)
-            start, end = parse(s), parse(e)
-        elif line.strip() == "":
-            if start is not None and buf:
-                captions.append((start, end, " ".join(buf)))
-            start, end, buf = None, None, []
+        lines = [ln.rstrip("\n") for ln in f]
+
+    entries = []
+    buf = []
+    for ln in lines:
+        if ln.strip() == "" and buf:
+            entries.append(buf); buf = []
         else:
-            buf.append(line.strip())
-    return captions
+            buf.append(ln)
+    if buf: entries.append(buf)
 
-def overlay_captions(video, vtt_path):
-    captions = parse_vtt(vtt_path)
-    subs = []
-    for (s, e, txt) in captions:
-        sub = (TextClip(txt, fontsize=60, color="white",
-                        stroke_color="black", stroke_width=2,
-                        size=(1080, None), method="caption")
-               .set_start(s).set_end(e).set_position(("center", "bottom")))
-        subs.append(sub)
-    return CompositeVideoClip([video, *subs], size=(1080, 1920))
+    idx = 1
+    out = []
+    ts_re = re.compile(r"(?P<s>\d+:\d+:\d+\.\d+)\s*-->\s*(?P<e>\d+:\d+:\d+\.\d+)")
 
-# -------------------------------
-# Video assembly
-# -------------------------------
-def download_image_to_file(url: str, dest_path: str):
-    r = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
-    with open(dest_path, "wb") as f:
-        f.write(r.content)
+    def fix_ts(ts: str) -> str:
+        # 00:00:01.234 -> 00:00:01,234
+        return ts.replace(".", ",")
 
-def assemble_video_from_images(image_urls: List[str], audio_path: str, out_path=RAW_VIDEO_PATH) -> str:
-    """
-    Create a vertical 1080x1920 MP4 from up to 5 images and the given audio file.
-    (Static slides to keep CI fast/reliable)
-    """
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    for chunk in entries:
+        times = None
+        text_lines = []
+        for ln in chunk:
+            if "-->" in ln:
+                m = ts_re.search(ln)
+                if m:
+                    s = fix_ts(m.group("s"))
+                    e = fix_ts(m.group("e"))
+                    times = f"{s} --> {e}"
+            elif ln and not ln.startswith("WEBVTT"):
+                text_lines.append(ln)
+        if times and text_lines:
+            out.append(str(idx))
+            out.append(times)
+            out.extend(text_lines)
+            out.append("")
+            idx += 1
 
-    narration = AudioFileClip(audio_path)
-    target_total = max(18.0, min(40.0, narration.duration))
-    per_slide = target_total / max(1, min(5, len(image_urls)))
-
-    clips = []
-    used = 0
-    for idx, url in enumerate(image_urls[:5]):
-        try:
-            fname = os.path.join(OUTPUT_DIR, f"frame_{idx}.jpg")
-            download_image_to_file(url, fname)
-            clip = ImageClip(fname).set_duration(per_slide).resize(height=1920)
-            # center crop to 1080x1920 if needed
-            if clip.w != 1080:
-                clip = clip.resize(width=1080) if clip.w < 1080 else clip.crop(x_center=clip.w/2, width=1080)
-            clips.append(clip)
-            used += 1
-        except Exception as e:
-            dprint(f"Image skip ({url}): {e}")
-            continue
-
-    if not clips:
-        narration.close()
-        raise RuntimeError("Could not build any image clips")
-
-    video = concatenate_videoclips(clips, method="compose").set_audio(narration)
-    video.write_videofile(out_path, fps=30, codec="libx264", audio_codec="aac", verbose=False, logger=None)
-    narration.close()
-    for c in clips:
-        c.close()
-    video.close()
-    return out_path
+    with open(srt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
 
 # -------------------------------
-# Thumbnail generation (1280x720)
+# Thumbnail (1280x720)
 # -------------------------------
-def load_font(size: int) -> ImageFont.FreeTypeFont:
-    # Try common fonts; fall back to PIL default
+def load_font(size: int):
     for path in [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
     ]:
         if os.path.exists(path):
+            from PIL import ImageFont
             return ImageFont.truetype(path, size=size)
+    from PIL import ImageFont
     return ImageFont.load_default()
 
-def text_wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> List[str]:
-    words = text.split()
-    lines, cur = [], []
-    for w in words:
-        trial = " ".join(cur + [w])
-        if draw.textlength(trial, font=font) <= max_width:
-            cur.append(w)
-        else:
-            if cur:
-                lines.append(" ".join(cur))
-            cur = [w]
-    if cur: lines.append(" ".join(cur))
-    return lines[:3]  # keep it concise
-
-def create_thumbnail(hero_url: str, title: str, brand: Optional[str], out_path=THUMBNAIL_PATH) -> str:
-    """
-    Make a 1280x720 thumbnail with blurred hero background, bold title, and optional brand tag.
-    """
+def create_thumbnail(hero_url: str, title: str, brand: Optional[str], out_path: str) -> str:
     W, H = 1280, 720
-    # Load hero image
-    r = requests.get(hero_url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    r = requests.get(hero_url, headers={"User-Agent": UA}, timeout=30)
     r.raise_for_status()
     img = Image.open(io.BytesIO(r.content)).convert("RGB")
 
-    # Fill background with blur
+    # bg blur
     bg = img.copy().resize((W, H), Image.LANCZOS).filter(ImageFilter.GaussianBlur(18))
-
-    # Foreground (contain)
-    fg = img.copy()
-    fg.thumbnail((W, H), Image.LANCZOS)
+    # fg contain
+    fg = img.copy(); fg.thumbnail((W, H), Image.LANCZOS)
     canvas = bg.copy()
-    x = (W - fg.width) // 2
-    y = (H - fg.height) // 2
-    canvas.paste(fg, (x, y))
+    canvas.paste(fg, ((W - fg.width)//2, (H - fg.height)//2))
 
     draw = ImageDraw.Draw(canvas)
-    # Dark gradient bottom for text legibility
-    grad_height = int(H * 0.42)
-    for i in range(grad_height):
-        alpha = int(255 * (i / grad_height) * 0.8)
-        draw.rectangle([(0, H - grad_height + i), (W, H - grad_height + i + 1)], fill=(0, 0, 0, alpha))
+    grad_h = int(H * 0.42)
+    for i in range(grad_h):
+        alpha = int(200 * (i/grad_h))
+        draw.rectangle([(0, H-grad_h+i), (W, H-grad_h+i+1)], fill=(0,0,0,alpha))
 
-    # Title text
     title_font = load_font(64)
-    max_text_width = int(W * 0.92)
-    lines = text_wrap(draw, title, title_font, max_text_width)
+    # naive wrap
+    words = title.split()
+    lines, cur = [], []
+    max_w = int(W*0.92)
+    for w in words:
+        trial = " ".join(cur+[w])
+        if draw.textlength(trial, font=title_font) <= max_w:
+            cur.append(w)
+        else:
+            lines.append(" ".join(cur)); cur=[w]
+    if cur: lines.append(" ".join(cur))
+    lines = lines[:3]
     line_h = int(title_font.size * 1.15)
-    total_h = line_h * len(lines)
-    y_text = H - grad_height + int((grad_height - total_h) / 2)
-
+    y = H - grad_h + int((grad_h - line_h*len(lines))/2)
     for line in lines:
-        w = draw.textlength(line, font=title_font)
-        draw.text(((W - w) / 2, y_text), line, fill="white", font=title_font, stroke_width=3, stroke_fill="black")
-        y_text += line_h
+        lw = draw.textlength(line, font=title_font)
+        draw.text(((W-lw)/2, y), line, fill="white", font=title_font,
+                  stroke_width=3, stroke_fill="black")
+        y += line_h
 
-    # Brand badge (optional)
     if brand:
         badge_font = load_font(36)
         pad = 18
-        text_w = draw.textlength(brand, font=badge_font)
-        bx = W - int(text_w) - pad*2 - 20
-        by = 20
-        bw = int(text_w) + pad*2
-        bh = badge_font.size + pad
-        draw.rounded_rectangle([bx, by, bx + bw, by + bh], radius=16, fill=(255, 255, 255, 220))
-        draw.text((bx + pad, by + pad/2), brand, fill="black", font=badge_font)
+        tw = draw.textlength(brand, font=badge_font)
+        bx = W - int(tw) - pad*2 - 20; by = 20
+        bw = int(tw) + pad*2; bh = badge_font.size + pad
+        draw.rounded_rectangle([bx,by,bx+bw,by+bh], radius=16, fill=(255,255,255,230))
+        draw.text((bx+pad, by+pad/2), brand, fill="black", font=badge_font)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     canvas.save(out_path, "JPEG", quality=90)
     return out_path
 
 # -------------------------------
-# Script builder
+# Build narration script
 # -------------------------------
-def build_narration_script(title: str, reviews: List[str], product_url: str, affiliate_tag: Optional[str]) -> str:
+def build_script(title: str, reviews: List[str], product_url: str) -> str:
     lines = [f"{title}. Quick takeaways from top reviews:"]
     for r in reviews[:3]:
         lines.append(r)
-    if affiliate_tag := os.getenv("AMAZON_AFFILIATE_TAG", "").strip():
+    tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
+    if tag:
         sep = "&" if "?" in product_url else "?"
-        lines.append(f"Full details and current price: {product_url}{sep}tag={affiliate_tag}")
+        lines.append(f"Full details and current price: {product_url}{sep}tag={tag}")
     else:
         lines.append("Check the link for details and current price.")
     return " ".join(lines)
 
 # -------------------------------
+# Video assembly via ffmpeg
+# -------------------------------
+def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path: str,
+                           out_path: str, music_path: Optional[str]) -> None:
+    """
+    Create 1080x1920 slideshow from images, burn SRT captions, mix background music.
+    """
+    # Get narration duration using ffprobe
+    probe = subprocess.run(
+        ["ffprobe","-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1", narration_mp3],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        dur = float(probe.stdout.strip())
+    except Exception:
+        dur = 24.0
+    dur = max(18.0, min(40.0, dur))
+    per = dur / max(1, len(image_files))
+
+    # inputs: one looped image input per slide
+    cmd = ["ffmpeg","-y"]
+    for img in image_files:
+        cmd += ["-loop","1","-t", f"{per:.3f}","-i", img]
+    # narration
+    cmd += ["-i", narration_mp3]
+    # optional music
+    if music_path and os.path.exists(music_path):
+        cmd += ["-i", music_path]
+
+    # Build filter_complex
+    vf_parts = []
+    for i in range(len(image_files)):
+        # scale and pad to 1080x1920, square pixels
+        vf_parts.append(f"[{i}:v]scale=1080:-2:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}]")
+    vf_concat_in = "".join(f"[v{i}]" for i in range(len(image_files)))
+    vf = f"{';'.join(vf_parts)};{vf_concat_in}concat=n={len(image_files)}:v=1:a=0[vout]"
+    # burn subtitles
+    if os.path.exists(srt_path):
+        # Use libass subtitles filter; force style for readability
+        style = "Fontsize=42,OutlineColour=&H80000000&,BorderStyle=3,Outline=2,Shadow=0,PrimaryColour=&H00FFFFFF&"
+        vf += f";[vout]subtitles={SRT_PATH}:force_style='{style}'[vfinal]"
+        vmap = "[vfinal]"
+    else:
+        vmap = "[vout]"
+
+    # audio mix
+    # narration is at index = len(image_files)
+    if music_path and os.path.exists(music_path):
+        a_narr = f"[{len(image_files)}:a]"
+        a_music = f"[{len(image_files)+1}:a]"
+        af = f"{a_music}volume=0.15[am];{a_narr}[am]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        amap = "[aout]"
+    else:
+        af = f"[{len(image_files)}:a]anull[aout]"
+        amap = "[aout]"
+
+    cmd += [
+        "-filter_complex", vf + ";" + af,
+        "-map", vmap, "-map", amap,
+        "-shortest",
+        "-r","30",
+        "-c:v","libx264","-preset","veryfast","-crf","22",
+        "-c:a","aac","-b:a","192k",
+        "-pix_fmt","yuv420p",
+        out_path
+    ]
+    run(cmd)
+
+# -------------------------------
 # Main
 # -------------------------------
 def main():
-    # Build queries
     env_qs = os.getenv("SEARCH_QUERIES")
     queries = [q.strip() for q in env_qs.split(",")] if env_qs else DEFAULT_QUERIES
 
-    print("\n=== Amazon Video Bot ===")
-    print(f"Version: {VERSION}")
-    print(f"API Key: {mask_key(RAPIDAPI_KEY)}")
-    print(f"API Host: {RAPIDAPI_HOST}")
-    print(f"Country: {COUNTRY}")
-    print(f"Queries: {queries}")
-    print(f"Brand: {BRAND_NAME or '(none)'}")
-    print("========================")
+    log("=== Amazon Video Bot ===")
+    log(f"Version: {VERSION} (commit {COMMIT})")
+    log(f"API Key: {mask_key(RAPIDAPI_KEY)}")
+    log(f"API Host: {RAPIDAPI_HOST}")
+    log(f"Country: {COUNTRY}")
+    log(f"Queries: {queries}")
+    log(f"Brand: {BRAND_NAME or '(none)'}")
+    log("========================")
 
     if not RAPIDAPI_KEY:
-        sys.exit("Missing RAPIDAPI_KEY env var")
+        sys.exit("Missing RAPIDAPI_KEY")
 
-    ensure_assets()
+    ensure_dirs(); ensure_bg_music()
 
-    # 1) Pick a product
-    asin = search_random_product(queries, COUNTRY)
+    # 1) pick product
+    asin = search_random_product(queries, COUNTERY := COUNTRY)
 
-    # 2) Details + photos
-    title, hero, product_url, photos = fetch_product_details(asin, COUNTRY)
-    print("=== Product Selected ===")
-    print(f"ASIN: {asin}")
-    print(f"Title: {title}")
-    print(f"Hero: {hero}")
-    print(f"URL:  {product_url}")
-    print("========================")
+    # 2) details + photos
+    title, hero, product_url, photos = fetch_product_details(asin, COUNTERY)
+    log("=== Product Selected ===")
+    log(f"ASIN: {asin}")
+    log(f"Title: {title}")
+    log(f"Hero:  {hero}")
+    log(f"URL:   {product_url}")
+    log("========================")
 
-    # 3) Reviews
+    # 3) reviews -> script
     try:
-        reviews = fetch_top_reviews(asin, COUNTRY, max_reviews=3)
+        reviews = fetch_top_reviews(asin, COUNTERY, max_reviews=3)
     except Exception as e:
         dprint(f"Reviews fetch failed: {e}")
         reviews = []
     if not reviews:
         reviews = ["Review data not available right now."]
+    script = build_script(title, reviews, product_url)
+    log("=== Narration ==="); log(script); log("=================")
 
-    # 4) Script + TTS (+ subtitles)
-    script = build_narration_script(title, reviews, product_url, os.getenv("AMAZON_AFFILIATE_TAG", "").strip() or None)
-    print("=== Narration ===")
-    print(script)
-    print("=================")
-    asyncio.run(synthesize_tts_with_subs(script, voice=VOICE, out_audio=AUDIO_PATH, out_vtt=VTT_PATH))
+    # 4) TTS + VTT + SRT
+    asyncio.run(synthesize_tts_with_subs(script, VOICE, AUDIO_PATH, VTT_PATH))
+    vtt_to_srt(VTT_PATH, SRT_PATH)
 
-    # 5) Assemble video (use hero + next photos)
-    image_urls = [u for u in ([hero] + photos[1:]) if u]
-    raw_video = assemble_video_from_images(image_urls, AUDIO_PATH, out_path=RAW_VIDEO_PATH)
+    # 5) Download up to 5 images
+    img_files = []
+    for idx, url in enumerate([hero] + photos[1:6], start=1):
+        try:
+            r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
+            r.raise_for_status()
+            fp = os.path.join(OUTPUT_DIR, f"frame_{idx}.jpg")
+            with open(fp, "wb") as f:
+                f.write(r.content)
+            img_files.append(fp)
+        except Exception as e:
+            dprint(f"Image skip {url}: {e}")
+    if not img_files:
+        raise RuntimeError("No images to build video")
 
-    # 6) Overlay captions and add background music
-    base = VideoFileClip(raw_video)
-    final = overlay_captions(base, VTT_PATH)
+    # 6) Build slideshow with ffmpeg (burn captions, mix music)
+    build_slideshow_ffmpeg(img_files, AUDIO_PATH, SRT_PATH, RAW_PATH, BG_MUSIC_PATH)
 
-    if os.path.exists(BG_MUSIC_PATH):
-        music = AudioFileClip(BG_MUSIC_PATH).volumex(0.15)
-        comp_audio = CompositeAudioClip([base.audio, music.set_duration(base.duration)])
-        final = final.set_audio(comp_audio)
+    # 7) Finalize (raw already has subs & music; keep as final)
+    # (If we wanted a 2-pass encode or extra steps we could add them here)
+    os.replace(RAW_PATH, FINAL_PATH)
 
-    final.write_videofile(FINAL_VIDEO_PATH, fps=30, codec="libx264", audio_codec="aac")
-    base.close()
-    final.close()
+    # 8) Thumbnail
+    thumb = create_thumbnail(hero, title, BRAND_NAME, THUMBNAIL)
 
-    # 7) Create YouTube thumbnail from hero
-    thumb = create_thumbnail(hero, title, BRAND_NAME, out_path=THUMBNAIL_PATH)
-    print(f"Thumbnail written to: {thumb}")
-    print(f"Video written to:     {FINAL_VIDEO_PATH}")
+    log(f"Thumbnail written to: {thumb}")
+    log(f"Video written to:     {FINAL_PATH}")
 
 if __name__ == "__main__":
-    # Light dependency bootstrap if numpy missing (moviepy sometimes needs it)
+    # minimal bootstrap (edge‑tts pulls aiohttp; assume ffmpeg preinstalled)
     try:
-        import numpy  # noqa
-    except ImportError:
-        os.system(f"{sys.executable} -m pip install --quiet numpy")
-    main()
+        main()
+    except Exception as e:
+        print("ERROR:", e)
+        sys.exit(1)
