@@ -67,38 +67,13 @@ from moviepy.editor import AudioFileClip, ImageClip, concatenate_videoclips
 import edge_tts
 
 
-def fetch_product_details(
-    asin: str, region: str, rapidapi_key: str, host: str
-) -> Tuple[str, str, str]:
+def fetch_product_details(asin: str, country: str, rapidapi_key: str, host: str) -> tuple[str, str, str]:
     """
-    Fetch detailed information about a product from the Real‑Time Amazon Data API.
-
-    The v2 API exposes a ``product-details`` endpoint which accepts the
-    product ASIN and optional ``country`` parameter.  This function
-    invokes that endpoint and extracts the product's title, the first
-    image URL, and its canonical Amazon URL.  If the API returns an
-    unexpected structure, a ``ValueError`` is raised.
-
-    Parameters
-    ----------
-    asin : str
-        The product's Amazon Standard Identification Number.
-    region : str
-        Marketplace region code (e.g. ``US``).  Mapped to the ``country``
-        parameter accepted by the API.
-    rapidapi_key : str
-        RapidAPI authentication key.
-    host : str
-        RapidAPI host (e.g. ``real-time-amazon-data.p.rapidapi.com``).
-
-    Returns
-    -------
-    Tuple[str, str, str]
-        A tuple of (title, image_url, product_url).
+    Fetch product title, first image URL, and product URL.
+    Uses v2 endpoint: /product-details with `country` param.
     """
-    # v2 Product Details endpoint – see RapidAPI docs.  Previously we
-    # called ``/product``, which is deprecated and returns 404s for
-    # OpenWeb Ninja.  The correct path is ``/product-details``.
+    import requests
+
     url = f"https://{host}/product-details"
     headers = {
         "X-RapidAPI-Key": rapidapi_key,
@@ -106,34 +81,30 @@ def fetch_product_details(
     }
     params = {
         "asin": asin,
-        # The API uses ``country`` rather than ``region`` to select the
-        # marketplace.  Pass through the caller-provided region value.
-        "country": region,
+        "country": country,  # <-- IMPORTANT: v2 expects `country`, not `region`
     }
+
     resp = requests.get(url, headers=headers, params=params, timeout=30)
     resp.raise_for_status()
-    data = resp.json()
-    try:
-        # v2 API returns ``product_title`` and either ``product_photo`` or
-        # ``product_photos``.  Extract the first available image.
-        title: str = data.get("product_title") or data.get("title")
-        # Image may be under ``product_photo`` (string or list) or
-        # ``product_photos`` (list).  Consolidate these cases.
-        photo_field = data.get("product_photo") or data.get("product_photos")
-        if isinstance(photo_field, list):
-            image_url = photo_field[0]
-        else:
-            image_url = photo_field
-        # Provide a fallback URL if the API omits ``product_url``.
-        product_url: str = data.get("product_url") or f"https://www.amazon.com/dp/{asin}"
-        if not title or not image_url:
-            raise ValueError("Missing title or image in API response")
-        return title, image_url, product_url
-    except Exception as exc:
-        # Include a snippet of the response for debugging.
-        raise ValueError(
-            f"Unexpected response when fetching product details for {asin}: {json.dumps(data)[:500]}"
-        ) from exc
+    payload = resp.json()
+
+    # Optional debug
+    if isinstance(payload, dict):
+        print("[DEBUG] /product-details keys:", list(payload.keys()))
+
+    data = payload.get("data") or {}
+    if not data:
+        raise RuntimeError(f"No product details returned for ASIN {asin}")
+
+    title = data.get("product_title") or "Unknown Title"
+    product_url = data.get("product_url") or ""
+    photos = data.get("product_photos") or []
+    image_url = photos[0] if photos else None
+
+    if not image_url:
+        raise RuntimeError(f"No image found in product details for ASIN {asin}")
+
+    return title, image_url, product_url
 
 
 def fetch_top_reviews(
