@@ -318,17 +318,18 @@ def fetch_search_product(
                 "X-RapidAPI-Key": rapidapi_key,
                 "X-RapidAPI-Host": host,
             }
+            # Use only recognised parameters: `query`, `page`, and `country`.  Including
+            # unsupported keys like `keywords` or `q` can cause some providers to
+            # return an empty result set.  We optionally include `sort_by` if
+            # searching via the v2 OpenWeb Ninja API, but it is safe to omit.
             params = {
-                # Some providers expect `query`, others expect `keywords` or `q`.
-                # We include multiple keys to maximise compatibility.  The API
-                # should ignore unknown parameters.
                 "query": query,
-                "keywords": query,
-                "q": query,
-                "country": region,
-                "language": language,
                 "page": 1,
+                "country": region,
             }
+            # If the provider supports a `sort_by` parameter, set it to RELEVANCE.
+            # Some hosts ignore unknown parameters gracefully.
+            params["sort_by"] = "RELEVANCE"
             try:
                 resp = requests.get(url, headers=headers, params=params, timeout=30)
                 resp.raise_for_status()
@@ -347,7 +348,6 @@ def fetch_search_product(
                 continue
             # Each product may be nested under a wrapper; flatten if needed
             if isinstance(products, dict):
-                # e.g. {"products": [...]} or similar
                 products = (
                     products.get("results")
                     or products.get("products")
@@ -358,7 +358,6 @@ def fetch_search_product(
                 continue
             random.shuffle(products)
             for product in products:
-                # Accept first product with an ASIN
                 asin = (
                     product.get("asin")
                     or product.get("asin13")
