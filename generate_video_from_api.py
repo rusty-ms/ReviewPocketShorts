@@ -394,7 +394,12 @@ def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path:
     vf_parts = []
     for i in range(len(image_files)):
         # scale and pad to 1080x1920, square pixels
-        vf_parts.append(f"[{i}:v]scale=1080:-2:flags=lanczos,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}]")
+        vf_parts.append(
+            f"[{i}:v]"
+            f"scale=1080:1920:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"pad=1080:1920:(1080-iw)/2:(1920-ih)/2:color=black,"
+            f"setsar=1[v{i}]"
+        )
     vf_concat_in = "".join(f"[v{i}]" for i in range(len(image_files)))
     vf = f"{';'.join(vf_parts)};{vf_concat_in}concat=n={len(image_files)}:v=1:a=0[vout]"
     # burn subtitles
