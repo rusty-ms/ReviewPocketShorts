@@ -401,16 +401,16 @@ def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path:
     if os.path.exists(srt_path):
         # Use libass subtitles filter; force style for readability
         # ASS/SSA color format: &HAABBGGRR&  (AA = alpha)
-    style = (
-        f"Fontname=DejaVu Sans,"
-        f"Fontsize={CAPTION_FONT_SIZE},"
-        f"BorderStyle=3,Outline={CAPTION_OUTLINE},Shadow=0,"
-        f"PrimaryColour=&H00FFFFFF&,"        # white
-        f"OutlineColour=&H80000000&,"        # semi‑transparent black outline
-        f"BackColour=&H{CAPTION_BOX_ALPHA}000000&,"  # translucent black caption box
-        f"Alignment={CAPTION_ALIGNMENT},"
-        f"MarginV={CAPTION_MARGIN_V}"
-    )
+        style = (
+            f"Fontname=DejaVu Sans,"
+            f"Fontsize={CAPTION_FONT_SIZE},"
+            f"BorderStyle=3,Outline={CAPTION_OUTLINE},Shadow=0,"
+            f"PrimaryColour=&H00FFFFFF&,"        # white
+            f"OutlineColour=&H80000000&,"        # semi‑transparent black outline
+            f"BackColour=&H{CAPTION_BOX_ALPHA}000000&,"  # translucent black caption box
+            f"Alignment={CAPTION_ALIGNMENT},"
+            f"MarginV={CAPTION_MARGIN_V}"
+        )
         vf += f";[vout]subtitles={SRT_PATH}:force_style='{style}'[vfinal]"
         vmap = "[vfinal]"
     else:
