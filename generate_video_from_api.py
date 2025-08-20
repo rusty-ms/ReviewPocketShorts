@@ -13,6 +13,7 @@ import shlex
 import random
 import asyncio
 import subprocess
+import math
 from typing import Tuple, List, Optional
 
 import requests
@@ -156,59 +157,59 @@ def fetch_top_reviews(asin: str, country: str, max_reviews: int = 3) -> List[str
     return out
 
 # -------------------------------
-# TTS + captions
+# TTS + captions (fixed for edge-tts)
 # -------------------------------
+
+
+def _ticks_to_vtt_ts(ticks: int) -> str:
+    # edge-tts offsets/durations are in 100-ns ticks (10,000,000 per second)
+    total_seconds = ticks / 10_000_000.0
+    h = int(total_seconds // 3600)
+    m = int((total_seconds % 3600) // 60)
+    s = total_seconds % 60
+    # VTT requires dot as decimal separator for milliseconds
+    return f"{h:02d}:{m:02d}:{s:06.3f}"
+
 async def synthesize_tts_with_subs(text: str, voice: str, out_audio: str, out_vtt: str):
-    com = edge_tts.Communicate(text, voice=voice)
-    await com.save(out_audio)
-    await com.save(out_vtt, format="vtt")
+    """
+    Generate narration MP3 and a WebVTT subtitle file by streaming edge-tts.
+    NOTE: edge-tts Communicate.save() does not accept a 'format' arg for VTT.
+    """
+    os.makedirs(os.path.dirname(out_audio), exist_ok=True)
+    communicate = edge_tts.Communicate(text, voice=voice)
+
+    # Collect captions from SentenceBoundary events while writing audio bytes
+    cues = []  # list of (start_ticks, end_ticks, text)
+    with open(out_audio, "wb") as af:
+        async for chunk in communicate.stream():
+            typ = chunk.get("type", "")
+            if typ == "audio":
+                af.write(chunk["data"])
+            else:
+                # Be tolerant to different casings
+                t = typ.lower()
+                if t == "sentenceboundary":
+                    start = int(chunk.get("offset", 0))
+                    dur   = int(chunk.get("duration", 0))
+                    end   = start + max(dur, 1)
+                    txt   = (chunk.get("text") or "").strip()
+                    if txt:
+                        cues.append((start, end, txt))
+
+    # Build a simple WebVTT file
+    lines = ["WEBVTT", ""]
+    for (start, end, txt) in cues:
+        s_ts = _ticks_to_vtt_ts(start)
+        e_ts = _ticks_to_vtt_ts(end)
+        lines.append(f"{s_ts} --> {e_ts}")
+        lines.append(txt)
+        lines.append("")  # blank line between cues
+
+    with open(out_vtt, "w", encoding="utf-8") as vf:
+        vf.write("\n".join(lines))
+
     return out_audio, out_vtt
 
-def vtt_to_srt(vtt_path: str, srt_path: str) -> None:
-    """
-    Quick VTT -> SRT converter good enough for edge-tts output.
-    """
-    with open(vtt_path, "r", encoding="utf-8") as f:
-        lines = [ln.rstrip("\n") for ln in f]
-
-    entries = []
-    buf = []
-    for ln in lines:
-        if ln.strip() == "" and buf:
-            entries.append(buf); buf = []
-        else:
-            buf.append(ln)
-    if buf: entries.append(buf)
-
-    idx = 1
-    out = []
-    ts_re = re.compile(r"(?P<s>\d+:\d+:\d+\.\d+)\s*-->\s*(?P<e>\d+:\d+:\d+\.\d+)")
-
-    def fix_ts(ts: str) -> str:
-        # 00:00:01.234 -> 00:00:01,234
-        return ts.replace(".", ",")
-
-    for chunk in entries:
-        times = None
-        text_lines = []
-        for ln in chunk:
-            if "-->" in ln:
-                m = ts_re.search(ln)
-                if m:
-                    s = fix_ts(m.group("s"))
-                    e = fix_ts(m.group("e"))
-                    times = f"{s} --> {e}"
-            elif ln and not ln.startswith("WEBVTT"):
-                text_lines.append(ln)
-        if times and text_lines:
-            out.append(str(idx))
-            out.append(times)
-            out.extend(text_lines)
-            out.append("")
-            idx += 1
-
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(out))
 
 # -------------------------------
 # Thumbnail (1280x720)
