@@ -36,8 +36,8 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
 COUNTRY = os.getenv("REGION", "US")
 VOICE = os.getenv("TTS_VOICE", "en-US-JennyNeural")
-BRAND_NAME = os.getenv("BRAND_NAME", "").strip() or None
-
+#BRAND_NAME = os.getenv("BRAND_NAME", "").strip() or None
+BRAND_NAME = "Review Pocket Shorts"
 OUTPUT_DIR = "output"
 ASSETS_DIR = "assets"
 THUMBNAIL_PATH = os.path.join(OUTPUT_DIR, "thumbnail.jpg")  # 1280x720
