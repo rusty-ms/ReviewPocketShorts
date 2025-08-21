@@ -31,7 +31,7 @@ RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com
 COUNTRY       = os.getenv("REGION", "US")
 VOICE         = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 BRAND_NAME    = os.getenv("BRAND_NAME", "").strip() or None
-DEBUG         = os.getenv("DEBUG", "0") == "1"
+DEBUG         = os.getenv("DEBUG", "1") == "1"
 
 OUTPUT_DIR = "output"
 ASSETS_DIR = "assets"
@@ -42,11 +42,28 @@ RAW_PATH   = os.path.join(OUTPUT_DIR, "raw.mp4")
 FINAL_PATH = os.path.join(OUTPUT_DIR, "video.mp4")
 THUMBNAIL  = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
 
-CAPTION_FONT_SIZE  = int(os.getenv("CAPTION_FONT_SIZE", 12))   # 36–48 looks good
+CAPTION_FONT_SIZE  = int(os.getenv("CAPTION_FONT_SIZE", 6))   # 36–48 looks good
 CAPTION_MARGIN_V   = int(os.getenv("CAPTION_MARGIN_V", 10))   # move text up from bottom
 CAPTION_ALIGNMENT  = int(os.getenv("CAPTION_ALIGNMENT", 2))    # 2=bottom‑center, 8=top‑center, 5=center
 CAPTION_OUTLINE    = int(os.getenv("CAPTION_OUTLINE", 5))
 CAPTION_BOX_ALPHA  = os.getenv("CAPTION_BOX_ALPHA", "00")      # 00–FF (hex, AA in &HAA..&)
+
+# captions on/off (default hidden)
+SHOW_CAPTIONS = os.getenv("SHOW_CAPTIONS", "0") == "1"
+
+# logo overlay
+LOGO_PATH     = os.getenv("LOGO_PATH", os.path.join(ASSETS_DIR, "logo.png"))
+LOGO_POS      = os.getenv("LOGO_POS", "tr")       # tl | tr | bl | br
+LOGO_WIDTH    = int(os.getenv("LOGO_WIDTH", 220)) # px width for overlay
+LOGO_MARGIN   = int(os.getenv("LOGO_MARGIN", 28)) # px
+LOGO_OPACITY  = float(os.getenv("LOGO_OPACITY", "0.85"))  # 0..1
+
+# artifact with copy/paste title/description/link
+WRITE_METADATA_TXT = os.getenv("WRITE_METADATA_TXT", "1") == "1"
+
+# image quality / size helpers
+PREFER_HIGHRES     = os.getenv("PREFER_HIGHRES", "1") == "1"
+AMZ_MAX_SIDE       = int(os.getenv("AMZ_MAX_SIDE", "2560"))  # try to bump Amazon photo URLs up to this
 
 MAX_REVIEWS              = int(os.getenv("MAX_REVIEWS", 2))
 REVIEW_SNIPPET_CHARS     = int(os.getenv("REVIEW_SNIPPET_CHARS", 160))
@@ -100,6 +117,55 @@ def ensure_bg_music():
             for chunk in r.iter_content(8192):
                 f.write(chunk)
         log(f"[INFO] Saved {BG_MUSIC_PATH}")
+
+def upgrade_amazon_image_url(url: str, max_side: int = AMZ_MAX_SIDE) -> str:
+    """
+    Try to bump Amazon m.media image URLs to a larger size by swapping the size token.
+    Examples we handle: ..._SL1500_.jpg, ..._AC_SL1200_.jpg → _SL2560_ (or max_side)
+    If no token found, we leave the URL.
+    """
+    if "m.media-amazon.com/images" not in url:
+        return url
+    # common patterns: _SL####_, _AC_SL####_
+    return re.sub(r"_(?:AC_)?SL\d+_", f"_SL{max_side}_", url)
+
+# -------------------------------
+# Amazonm image as PNG
+# -------------------------------
+
+def fetch_image_as_png(pic_url: str, out_path: str, headers: dict, prefer_highres: bool = True) -> str:
+    """
+    Download an image, normalize orientation/colors, and save as PNG.
+    Returns the written file path. Raises on hard errors.
+    """
+    # Try “upgrading” Amazon URL to a higher-res variant first
+    if prefer_highres:
+        try:
+            pic_url = upgrade_amazon_image_url(pic_url)
+        except Exception:
+            pass
+
+    r = requests.get(pic_url, headers=headers, timeout=30)
+    r.raise_for_status()
+
+    im = Image.open(io.BytesIO(r.content))
+
+    # Normalize EXIF rotation (fixes sideways images)
+    try:
+        im = ImageOps.exif_transpose(im)
+    except Exception:
+        pass
+
+    # Ensure RGB (some assets may be P/LA/CMYK)
+    if im.mode not in ("RGB", "RGBA"):
+        im = im.convert("RGB")
+    elif im.mode == "RGBA":
+        # remove alpha to keep the pipeline simple unless you want transparent PNGs
+        im = im.convert("RGB")
+
+    # Save as PNG (lossless). optimize=True reduces size a bit; you can add compress_level=6..9 if desired
+    im.save(out_path, "PNG", optimize=True)
+    return out_path
 
 # -------------------------------
 # RapidAPI (v2)
@@ -384,6 +450,37 @@ def build_script(title: str, reviews: list[str], product_url: str) -> str:
     return " ".join(lines)
 
 # -------------------------------
+# Metadata
+# -------------------------------
+
+def build_affiliate_url(product_url: str) -> str:
+    tag = os.getenv("AMAZON_AFFILIATE_TAG", "").strip()
+    if not tag:
+        return product_url
+    sep = "&" if "?" in product_url else "?"
+    return f"{product_url}{sep}tag={tag}"
+
+def write_metadata_file(title: str, reviews_or_features: List[str], product_url: str, path: str) -> str:
+    aff = build_affiliate_url(product_url)
+    # same text your TTS uses but formatted for description
+    bullets = "\n".join([f"• {x}" for x in reviews_or_features[:3]]) if reviews_or_features else ""
+    description = (
+        f"{title}\n\n"
+        f"{('Key points' if 'Key features' in INTRO_PREFIX else 'Top reviews')}:\n{bullets}\n\n"
+        f"Amazon link (affiliate): {aff}\n"
+        f"#Amazon #trending #shorts"
+    )
+    blob = (
+        "=== COPY/PASTE METADATA ===\n"
+        f"Title: {title}\n\n"
+        f"Description:\n{description}\n\n"
+        f"Affiliate Link Only:\n{aff}\n"
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(blob)
+    return path
+
+# -------------------------------
 # Video assembly via ffmpeg
 # -------------------------------
 def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path: str,
@@ -425,24 +522,38 @@ def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path:
         )
     vf_concat_in = "".join(f"[v{i}]" for i in range(len(image_files)))
     vf = f"{';'.join(vf_parts)};{vf_concat_in}concat=n={len(image_files)}:v=1:a=0[vout]"
-    # burn subtitles
-    if os.path.exists(srt_path):
-        # Use libass subtitles filter; force style for readability
-        # ASS/SSA color format: &HAABBGGRR&  (AA = alpha)
+    # burn subtitles only if enabled AND file exists
+    if SHOW_CAPTIONS and os.path.exists(srt_path):
         style = (
             f"Fontname=DejaVu Sans,"
             f"Fontsize={CAPTION_FONT_SIZE},"
             f"BorderStyle=3,Outline={CAPTION_OUTLINE},Shadow=0,"
-            f"PrimaryColour=&H00FFFFFF&,"        # white
-            f"OutlineColour=&H80000000&,"        # semi‑transparent black outline
-            f"BackColour=&H{CAPTION_BOX_ALPHA}000000&,"  # translucent black caption box
+            f"PrimaryColour=&H00FFFFFF&,"
+            f"OutlineColour=&H80000000&,"
+            f"BackColour=&H{CAPTION_BOX_ALPHA}000000&,"
             f"Alignment={CAPTION_ALIGNMENT},"
             f"MarginV={CAPTION_MARGIN_V}"
         )
-        vf += f";[vout]subtitles={SRT_PATH}:force_style='{style}'[vfinal]"
-        vmap = "[vfinal]"
+        vf += f";[vout]subtitles={srt_path}:force_style='{style}'[vsub]"
+        v_current = "[vsub]"
     else:
-        vmap = "[vout]"
+        v_current = "[vout]"
+
+    # optional logo overlay
+    have_logo = LOGO_PATH and os.path.exists(LOGO_PATH)
+    if have_logo:
+        # add logo as an input
+        cmd += ["-i", LOGO_PATH]
+        logo_idx = len(image_files) + (2 if (music_path and os.path.exists(music_path)) else 1)  # after voice (+ music)
+        # scale logo to width, keep AR, apply opacity
+        pos = LOGO_POS.lower()
+        x_expr = f"{LOGO_MARGIN}" if "l" in pos else f"W-w-{LOGO_MARGIN}"
+        y_expr = f"{LOGO_MARGIN}" if "t" in pos else f"H-h-{LOGO_MARGIN}"
+        vf += (
+            f";[{logo_idx}:v]scale={LOGO_WIDTH}:-1,format=rgba,colorchannelmixer=aa={LOGO_OPACITY}[logo]"
+            f";{v_current}[logo]overlay={x_expr}:{y_expr}[vlogo]"
+        )
+        v_current = "[vlogo]"
 
     # audio mix
     # narration is at index = len(image_files)
@@ -457,7 +568,7 @@ def build_slideshow_ffmpeg(image_files: List[str], narration_mp3: str, srt_path:
 
     cmd += [
         "-filter_complex", vf + ";" + af,
-        "-map", vmap, "-map", amap,
+        "-map", v_current, "-map", amap,
         "-shortest",
         "-r","30",
         "-c:v","libx264","-preset","veryfast","-crf","22",
@@ -530,19 +641,21 @@ def main():
 
     # 5) Download up to 5 images
     img_files = []
+    headers = {"User-Agent": UA}
+    
     for idx, url in enumerate([hero] + photos[1:6], start=1):
         try:
-            r = requests.get(url, headers={"User-Agent": UA}, timeout=30)
-            r.raise_for_status()
-            fp = os.path.join(OUTPUT_DIR, f"frame_{idx}.jpg")
-            with open(fp, "wb") as f:
-                f.write(r.content)
+            fp = os.path.join(OUTPUT_DIR, f"frame_{idx}.png")
+            fetch_image_as_png(url, fp, headers, prefer_highres=PREFER_HIGHRES)
             img_files.append(fp)
         except Exception as e:
             dprint(f"Image skip {url}: {e}")
+    
     if not img_files:
         raise RuntimeError("No images to build video")
+        
 
+        
     # 6) Build slideshow with ffmpeg (burn captions, mix music)
     build_slideshow_ffmpeg(img_files, AUDIO_PATH, SRT_PATH, RAW_PATH, BG_MUSIC_PATH)
 
@@ -555,6 +668,12 @@ def main():
 
     log(f"Thumbnail written to: {thumb}")
     log(f"Video written to:     {FINAL_PATH}")
+
+     # 9) Metadata artifact for easy upload
+     if WRITE_METADATA_TXT:
+        meta_path = os.path.join(OUTPUT_DIR, "metadata.txt")
+        write_metadata_file(title, reviews, product_url, meta_path)
+        log(f"Metadata written to: {meta_path}")
 
 if __name__ == "__main__":
     # minimal bootstrap (edge‑tts pulls aiohttp; assume ffmpeg preinstalled)
