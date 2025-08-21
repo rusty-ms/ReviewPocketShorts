@@ -42,17 +42,17 @@ RAW_PATH   = os.path.join(OUTPUT_DIR, "raw.mp4")
 FINAL_PATH = os.path.join(OUTPUT_DIR, "video.mp4")
 THUMBNAIL  = os.path.join(OUTPUT_DIR, "thumbnail.jpg")
 
-CAPTION_FONT_SIZE  = int(os.getenv("CAPTION_FONT_SIZE", 36))   # 36–48 looks good
-CAPTION_MARGIN_V   = int(os.getenv("CAPTION_MARGIN_V", 120))   # move text up from bottom
+CAPTION_FONT_SIZE  = int(os.getenv("CAPTION_FONT_SIZE", 12))   # 36–48 looks good
+CAPTION_MARGIN_V   = int(os.getenv("CAPTION_MARGIN_V", 10))   # move text up from bottom
 CAPTION_ALIGNMENT  = int(os.getenv("CAPTION_ALIGNMENT", 2))    # 2=bottom‑center, 8=top‑center, 5=center
-CAPTION_OUTLINE    = int(os.getenv("CAPTION_OUTLINE", 2))
-CAPTION_BOX_ALPHA  = os.getenv("CAPTION_BOX_ALPHA", "64")      # 00–FF (hex, AA in &HAA..&)
+CAPTION_OUTLINE    = int(os.getenv("CAPTION_OUTLINE", 5))
+CAPTION_BOX_ALPHA  = os.getenv("CAPTION_BOX_ALPHA", "00")      # 00–FF (hex, AA in &HAA..&)
 
 MAX_REVIEWS              = int(os.getenv("MAX_REVIEWS", 2))
 REVIEW_SNIPPET_CHARS     = int(os.getenv("REVIEW_SNIPPET_CHARS", 160))
 INTRO_PREFIX             = os.getenv("INTRO_PREFIX", "{title}. Quick takeaways from reviews:")
 OUTRO_TEXT               = os.getenv("OUTRO_TEXT", "Check the link for details and current price.")
-INCLUDE_AFFILIATE_LINE   = os.getenv("INCLUDE_AFFILIATE_LINE", "1") == "1"
+INCLUDE_AFFILIATE_LINE   = os.getenv("INCLUDE_AFFILIATE_LINE", "1") == "0"
 
 DEFAULT_QUERIES = [
     "books","electronics","home kitchen","toys games","beauty",
