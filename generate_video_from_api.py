@@ -168,6 +168,29 @@ def fetch_top_reviews(asin: str, country: str, max_reviews: int = 3) -> List[str
         if len(out) >= max_reviews: break
     return out
 
+def fetch_feature_snippets_from_details(asin: str, country: str, limit: int = 3) -> List[str]:
+    url = f"https://{RAPIDAPI_HOST}/product-details"
+    js = req("GET", url, {"asin": asin, "country": country})
+    data = js.get("data") or {}
+
+    # Common fields different providers use
+    candidates = []
+    for key in ["about_product", "product_bullets", "product_highlights", "features"]:
+        val = data.get(key)
+        if isinstance(val, list):
+            candidates.extend([str(x) for x in val if x])
+        elif isinstance(val, str):
+            candidates.extend([s.strip() for s in val.split("\n") if s.strip()])
+
+    cleaned = []
+    for c in candidates:
+        c = " ".join(c.split())
+        if 8 <= len(c) <= 220:
+            cleaned.append(c)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
 # -------------------------------
 # TTS + captions (fixed for edge-tts)
 # -------------------------------
@@ -477,14 +500,27 @@ def main():
     log(f"URL:   {product_url}")
     log("========================")
 
-    # 3) reviews -> script
+    # 3) reviews -> script (with feature fallback so we never speak "no reviews")
+    reviews = []
     try:
-        reviews = fetch_top_reviews(asin, COUNTERY, max_reviews=3)
+        reviews = fetch_top_reviews(asin, COUNTERY, max_reviews=5)
     except Exception as e:
         dprint(f"Reviews fetch failed: {e}")
         reviews = []
+    
     if not reviews:
-        reviews = ["Review data not available right now."]
+        # try to pull bullets/features from product-details
+        features = fetch_feature_snippets_from_details(asin, COUNTERY, limit=3)
+        if features:
+            # soften the intro so it doesn't imply reviews
+            global INTRO_PREFIX
+            INTRO_PREFIX = "{title}. Key features:"
+            reviews = features
+        else:
+            # last resort: very short script, no filler line
+            INTRO_PREFIX = "{title}."
+            reviews = []
+    
     script = build_script(title, reviews, product_url)
     log("=== Narration ==="); log(script); log("=================")
 
