@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Amazon Video Bot (ffmpeg edition)
-Version: 2025-08-20e
+Version: 2025-08-21-4:24
 """
 
 import os
@@ -18,7 +18,7 @@ from typing import Tuple, List, Optional
 
 import requests
 import edge_tts
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
 
 # -------------------------------
 # Config / Env
@@ -669,8 +669,8 @@ def main():
     log(f"Thumbnail written to: {thumb}")
     log(f"Video written to:     {FINAL_PATH}")
 
-     # 9) Metadata artifact for easy upload
-     if WRITE_METADATA_TXT:
+    # 9) Metadata artifact for easy upload
+    if WRITE_METADATA_TXT:
         meta_path = os.path.join(OUTPUT_DIR, "metadata.txt")
         write_metadata_file(title, reviews, product_url, meta_path)
         log(f"Metadata written to: {meta_path}")
