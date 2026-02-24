@@ -41,11 +41,18 @@ def _get_credentials() -> Credentials:
             flow = InstalledAppFlow.from_client_secrets_file(
                 config.YOUTUBE_CLIENT_SECRET_FILE, SCOPES
             )
-            # Detect headless environment (no display) — use console flow
+            # Detect headless environment (no display) — use manual copy/paste flow
             if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+                flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
+                auth_url, _ = flow.authorization_url(prompt="consent")
                 print("\n⚠️  Headless environment detected.")
-                print("Visit this URL in your browser to authorize YouTube access:\n")
-                creds = flow.run_console()
+                print("=" * 60)
+                print("Open this URL in your browser to authorize YouTube:\n")
+                print(auth_url)
+                print("\n" + "=" * 60)
+                code = input("Paste the authorization code here: ").strip()
+                flow.fetch_token(code=code)
+                creds = flow.credentials
             else:
                 creds = flow.run_local_server(port=0)
 
