@@ -1,0 +1,18 @@
+[Unit]
+Description=ReviewPocketShorts Webhook Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ReviewPocketShorts
+EnvironmentFile=/opt/ReviewPocketShorts/.env
+ExecStart=/opt/ReviewPocketShorts/venv/bin/python3 /opt/ReviewPocketShorts/webhook_server.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=reviewpocketshorts
+
+[Install]
+WantedBy=multi-user.target

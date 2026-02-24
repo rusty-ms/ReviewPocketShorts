@@ -17,28 +17,95 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [240, 300],
-      "notes": "Runs every day at 10:00 AM server time. Adjust cron expression as needed."
+      "notes": "Fires every day at 10:00 AM (server timezone). Adjust as needed."
     },
     {
       "parameters": {
-        "command": "cd /opt/ReviewPocketShorts && python main.py 2>&1"
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ $env.RPS_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
       },
-      "id": "run-pipeline",
-      "name": "Run Pipeline Script",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "id": "trigger-pipeline",
+      "name": "Trigger Pipeline",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
       "position": [460, 300],
-      "notes": "Executes the full Python pipeline. Outputs JSON result to stdout."
+      "notes": "Fires the webhook on the host. Returns 202 immediately — pipeline runs in background."
     },
     {
       "parameters": {
-        "jsCode": "const output = $input.first().json.stdout || '';\nconst lines = output.split('\\n');\n// Find the JSON result block (last {...} block in output)\nlet jsonStr = '';\nlet braceDepth = 0;\nlet capturing = false;\nfor (const line of lines) {\n  for (const ch of line) {\n    if (ch === '{') { braceDepth++; capturing = true; }\n    if (capturing) jsonStr += ch;\n    if (ch === '}') braceDepth--;\n    if (capturing && braceDepth === 0) break;\n  }\n  if (capturing) jsonStr += '\\n';\n  if (capturing && braceDepth === 0) break;\n}\ntry {\n  const result = JSON.parse(jsonStr);\n  return [{ json: result }];\n} catch(e) {\n  return [{ json: { success: false, error: 'Failed to parse pipeline output', raw: output } }];\n}"
+        "amount": 90,
+        "unit": "seconds"
       },
-      "id": "parse-result",
-      "name": "Parse Pipeline Result",
-      "type": "n8n-nodes-base.code",
+      "id": "wait-for-pipeline",
+      "name": "Wait 90s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Give the pipeline time to run (~45-60s typical). Adjust if needed."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8765/status",
+        "options": {}
+      },
+      "id": "poll-status",
+      "name": "Poll Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "still-running",
+              "leftValue": "={{ $json.running }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "still-running",
+      "name": "Still Running?",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [680, 300]
+      "position": [1100, 300],
+      "notes": "If still running, wait another 60s and poll again."
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "wait-more",
+      "name": "Wait 60s More",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1100, 160]
     },
     {
       "parameters": {
@@ -51,7 +118,7 @@
           "conditions": [
             {
               "id": "success-check",
-              "leftValue": "={{ $json.success }}",
+              "leftValue": "={{ $json.last_result.success }}",
               "rightValue": true,
               "operator": {
                 "type": "boolean",
@@ -66,27 +133,27 @@
       "name": "Success?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [900, 300]
+      "position": [1320, 300]
     },
     {
       "parameters": {
-        "jsCode": "const result = $input.first().json;\nconst product = result.product || {};\nconst lines = [\n  `✅ *ReviewPocketShorts posted!*`,\n  ``,\n  `📦 *${product.title || 'Product'}*`,\n  `💰 ${product.price || ''}  ⭐ ${product.rating || ''}/5`,\n  ``,\n  `🎬 YouTube: ${result.youtube_url || 'N/A'}`,\n  `📸 Instagram: ${result.instagram_permalink || 'N/A'}`,\n  ``,\n  `🛒 Affiliate: ${product.affiliate_url || 'N/A'}`,\n];\nreturn [{ json: { message: lines.join('\\n') } }];"
+        "jsCode": "const r = $input.first().json.last_result || {};\nconst p = r.product || {};\nconst lines = [\n  '✅ *ReviewPocketShorts posted!*',\n  '',\n  `📦 *${p.title || 'Unknown Product'}*`,\n  `💰 ${p.price || ''}   ⭐ ${p.rating || 'N/A'}/5`,\n  '',\n  `🎬 YouTube: ${r.youtube_url || 'N/A'}`,\n  `📸 Instagram: ${r.instagram_permalink || 'N/A'}`,\n  '',\n  `🛒 Affiliate: ${p.affiliate_url || 'N/A'}`,\n];\nreturn [{ json: { message: lines.join('\\n') } }];"
       },
-      "id": "format-success-msg",
-      "name": "Format Success Message",
+      "id": "format-success",
+      "name": "Format Success",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 200]
+      "position": [1540, 200]
     },
     {
       "parameters": {
-        "jsCode": "const result = $input.first().json;\nreturn [{ json: { message: `❌ *ReviewPocketShorts pipeline FAILED*\\n\\nError: ${result.error || 'Unknown error'}\\n\\nCheck logs on the server.` } }];"
+        "jsCode": "const r = $input.first().json.last_result || {};\nreturn [{ json: { message: `❌ *ReviewPocketShorts FAILED*\\n\\nError: ${r.error || 'Unknown'}\\n\\nCheck: /opt/ReviewPocketShorts/logs/` } }];"
       },
-      "id": "format-error-msg",
-      "name": "Format Error Message",
+      "id": "format-error",
+      "name": "Format Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 400]
+      "position": [1540, 400]
     },
     {
       "parameters": {
@@ -101,11 +168,10 @@
         }
       },
       "id": "notify-success",
-      "name": "Notify Success (Telegram)",
+      "name": "Notify Success",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1340, 200],
-      "notes": "Configure your Telegram bot credentials in n8n. Set TELEGRAM_CHAT_ID in n8n variables."
+      "position": [1760, 200]
     },
     {
       "parameters": {
@@ -120,42 +186,48 @@
         }
       },
       "id": "notify-error",
-      "name": "Notify Error (Telegram)",
+      "name": "Notify Error",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1340, 400],
-      "notes": "Same bot, different message. You'll know immediately if something breaks."
+      "position": [1760, 400]
     }
   ],
   "connections": {
     "Daily 10am Trigger": {
-      "main": [[{ "node": "Run Pipeline Script", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Trigger Pipeline", "type": "main", "index": 0 }]]
     },
-    "Run Pipeline Script": {
-      "main": [[{ "node": "Parse Pipeline Result", "type": "main", "index": 0 }]]
+    "Trigger Pipeline": {
+      "main": [[{ "node": "Wait 90s", "type": "main", "index": 0 }]]
     },
-    "Parse Pipeline Result": {
-      "main": [[{ "node": "Success?", "type": "main", "index": 0 }]]
+    "Wait 90s": {
+      "main": [[{ "node": "Poll Status", "type": "main", "index": 0 }]]
+    },
+    "Poll Status": {
+      "main": [[{ "node": "Still Running?", "type": "main", "index": 0 }]]
+    },
+    "Still Running?": {
+      "main": [
+        [{ "node": "Wait 60s More", "type": "main", "index": 0 }],
+        [{ "node": "Success?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 60s More": {
+      "main": [[{ "node": "Poll Status", "type": "main", "index": 0 }]]
     },
     "Success?": {
       "main": [
-        [{ "node": "Format Success Message", "type": "main", "index": 0 }],
-        [{ "node": "Format Error Message", "type": "main", "index": 0 }]
+        [{ "node": "Format Success", "type": "main", "index": 0 }],
+        [{ "node": "Format Error", "type": "main", "index": 0 }]
       ]
     },
-    "Format Success Message": {
-      "main": [[{ "node": "Notify Success (Telegram)", "type": "main", "index": 0 }]]
+    "Format Success": {
+      "main": [[{ "node": "Notify Success", "type": "main", "index": 0 }]]
     },
-    "Format Error Message": {
-      "main": [[{ "node": "Notify Error (Telegram)", "type": "main", "index": 0 }]]
+    "Format Error": {
+      "main": [[{ "node": "Notify Error", "type": "main", "index": 0 }]]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": ["review-pocket-shorts", "automation", "youtube", "instagram"],
-  "triggerCount": 1,
-  "updatedAt": "2026-02-24T00:00:00.000Z",
-  "versionId": "1"
+  "settings": { "executionOrder": "v1" },
+  "tags": ["review-pocket-shorts", "automation"],
+  "triggerCount": 1
 }
