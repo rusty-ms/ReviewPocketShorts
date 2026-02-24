@@ -163,8 +163,9 @@ def run_pipeline(dry_run: bool = False) -> dict:
         else:
             logger.info("Step 8/8: Instagram not configured — skipping")
 
-        # ── Mark product used ──────────────────────────────────────
-        mark_used(product["asin"], product["title"], yt_result["video_url"])
+        # ── Mark product used (skip for mock/test products) ────────
+        if not product.get("_mock"):
+            mark_used(product["asin"], product["title"], yt_result["video_url"])
 
         result["success"] = True
         logger.info(f"=== Pipeline COMPLETE (run_id={run_id}) ===")

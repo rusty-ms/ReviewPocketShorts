@@ -201,31 +201,67 @@ def pick_fresh_product(categories: list[str] = None) -> Optional[dict]:
     
     for category in cats:
         products = search_bestsellers(category)
-        # Filter out already-used products
+        # Skip deduplication for mock products (PA API not active yet)
+        if products and products[0].get("_mock"):
+            product = random.choice(products)
+            logger.info(f"[MOCK] Selected product: {product['title']} (PA API not active)")
+            return product
+        # Filter out already-used real products
         fresh = [p for p in products if not is_used(p["asin"])]
         if fresh:
             product = random.choice(fresh)
             logger.info(f"Selected fresh product: {product['title']} (ASIN: {product['asin']})")
             return product
         time.sleep(1)  # Rate limiting
-    
+
     logger.warning("No fresh products found — clearing history may be needed")
     return None
 
 
 def _mock_products() -> list[dict]:
-    """Mock data for testing without PA API keys."""
-    return [
+    """
+    Mock data for testing without PA API keys.
+    Used when Amazon PA API is unavailable or not yet activated.
+    NOTE: Mock products are flagged so deduplication is skipped.
+    """
+    products = [
         {
             "asin": "B08N5KWB9H",
             "title": "Echo Dot (4th Gen) | Smart speaker with Alexa",
-            "images": [
-                "https://m.media-amazon.com/images/I/714Rq4k05UL._AC_SL1000_.jpg"
-            ],
-            "price": "$49.99",
-            "rating": 4.7,
-            "review_count": 523847,
+            "images": ["https://m.media-amazon.com/images/I/714Rq4k05UL._AC_SL1000_.jpg"],
+            "price": "$49.99", "rating": 4.7, "review_count": 523847,
             "category": "Electronics",
-            "affiliate_url": build_affiliate_url("B08N5KWB9H"),
-        }
+        },
+        {
+            "asin": "B09B8YWXDF",
+            "title": "Instant Pot Duo 7-in-1 Electric Pressure Cooker",
+            "images": ["https://m.media-amazon.com/images/I/71V1ThFHssL._AC_SL1500_.jpg"],
+            "price": "$79.99", "rating": 4.8, "review_count": 145000,
+            "category": "Kitchen",
+        },
+        {
+            "asin": "B08DFPV5RP",
+            "title": "Hydro Flask 32 oz Wide Mouth Water Bottle",
+            "images": ["https://m.media-amazon.com/images/I/51mRer3IDVL._AC_SL1500_.jpg"],
+            "price": "$44.95", "rating": 4.8, "review_count": 89500,
+            "category": "Sports",
+        },
+        {
+            "asin": "B07PXGQC1Q",
+            "title": "COSRX Advanced Snail 96 Mucin Power Essence",
+            "images": ["https://m.media-amazon.com/images/I/61OdG5TRrpL._AC_SL1000_.jpg"],
+            "price": "$25.00", "rating": 4.5, "review_count": 67000,
+            "category": "Beauty",
+        },
+        {
+            "asin": "B07MQWQJBT",
+            "title": "LEGO Classic Medium Creative Brick Box",
+            "images": ["https://m.media-amazon.com/images/I/91zMn8ueEML._AC_SL1500_.jpg"],
+            "price": "$39.99", "rating": 4.8, "review_count": 43000,
+            "category": "Toys",
+        },
     ]
+    for p in products:
+        p["affiliate_url"] = build_affiliate_url(p["asin"])
+        p["_mock"] = True  # Flag so deduplication is skipped
+    return products
