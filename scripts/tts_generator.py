@@ -1,11 +1,12 @@
 """
-tts_generator.py - Generate TTS voiceover using edge-tts (Microsoft, FREE).
-Falls back to OpenAI TTS if edge-tts fails.
+tts_generator.py - Generate TTS voiceover using OpenAI TTS (primary).
+Voice: alloy, echo, fable, onyx, nova, shimmer
+nova = warm, natural female voice — perfect for review content.
 
-edge-tts cost: FREE (uses Microsoft Edge TTS unofficially)
-OpenAI TTS fallback cost: ~$0.015 per 1000 chars
+Cost: ~$0.015 per 1,000 characters (~$0.01-0.02 per video)
+
+edge-tts was removed — Microsoft's endpoint blocks server IPs with 403.
 """
-import asyncio
 import logging
 import os
 import subprocess
@@ -13,49 +14,62 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# OpenAI TTS voice options:
+# nova    = warm, natural female (default — best for reviews)
+# shimmer = expressive female
+# alloy   = neutral
+# echo    = male, conversational
+# fable   = expressive male
+# onyx    = deep male
+TTS_VOICE_MAP = {
+    "en-US-JennyNeural": "nova",    # edge-tts compat alias
+    "en-US-AriaNeural": "shimmer",
+    "en-US-GuyNeural": "echo",
+    "nova": "nova",
+    "shimmer": "shimmer",
+    "alloy": "alloy",
+    "echo": "echo",
+    "fable": "fable",
+    "onyx": "onyx",
+}
 
-async def _generate_edge_tts(text: str, output_path: str, voice: str):
-    """Generate audio using edge-tts (free)."""
-    import edge_tts
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(output_path)
+
+def _resolve_voice(voice_setting: str) -> str:
+    """Map edge-tts voice names or OpenAI voice names to valid OpenAI voices."""
+    return TTS_VOICE_MAP.get(voice_setting, "nova")
 
 
 def generate_voiceover(script: str, output_path: str) -> str:
     """
-    Generate a voiceover MP3 from script text.
-    Tries edge-tts first (free), falls back to OpenAI TTS.
+    Generate a voiceover MP3 using OpenAI TTS.
     Returns path to the generated audio file.
     """
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
-    voice = config.TTS_VOICE
 
-    # Try edge-tts (free)
-    try:
-        asyncio.run(_generate_edge_tts(script, output_path, voice))
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
-            duration = _get_audio_duration(output_path)
-            logger.info(f"edge-tts voiceover generated: {output_path} ({duration:.1f}s)")
-            return output_path
-    except Exception as e:
-        logger.warning(f"edge-tts failed: {e} — trying OpenAI TTS fallback")
+    voice = _resolve_voice(config.TTS_VOICE)
 
-    # Fallback: OpenAI TTS
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=config.OPENAI_API_KEY)
-        response = client.audio.speech.create(
-            model="tts-1",
-            voice="nova",  # Warm female voice
-            input=script,
-        )
-        response.stream_to_file(output_path)
-        duration = _get_audio_duration(output_path)
-        logger.info(f"OpenAI TTS voiceover generated: {output_path} ({duration:.1f}s)")
-        return output_path
-    except Exception as e:
-        logger.error(f"Both TTS methods failed: {e}")
-        raise
+    if not config.OPENAI_API_KEY:
+        raise EnvironmentError("OPENAI_API_KEY not set — cannot generate TTS")
+
+    from openai import OpenAI
+    client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+    logger.info(f"Generating TTS voiceover (voice={voice}, {len(script)} chars)...")
+
+    response = client.audio.speech.create(
+        model="tts-1",      # tts-1 = fast + cheap; tts-1-hd = higher quality
+        voice=voice,
+        input=script,
+        response_format="mp3",
+    )
+    response.stream_to_file(output_path)
+
+    if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+        raise RuntimeError("TTS output file missing or empty")
+
+    duration = _get_audio_duration(output_path)
+    logger.info(f"TTS voiceover generated: {output_path} ({duration:.1f}s)")
+    return output_path
 
 
 def _get_audio_duration(audio_path: str) -> float:
