@@ -197,25 +197,28 @@ def _add_text_overlay(input_path: str, output_path: str, product: dict):
         return str(s).replace("'", "\u2019").replace(":", r"\:").replace(",", r"\,").replace("[", r"\[").replace("]", r"\]")
 
     drawtext = (
-        # Top brand banner background
+        # Top brand banner
         f"drawbox=x=0:y=0:w={W}:h=100:color=black@0.65:t=fill,"
-        # Brand name
-        f"drawtext=text='Review Pocket Shorts':x=(w-text_w)/2:y=30"
-        f":fontsize=40:fontcolor=white:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        f"drawtext=text='Review Pocket Shorts':x=(w-text_w)/2:y=28"
+        f":fontsize=38:fontcolor=white:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         f":borderw=2:bordercolor=black@0.8,"
-        # Bottom info banner background
-        f"drawbox=x=0:y={H-300}:w={W}:h=300:color=black@0.65:t=fill,"
+        # Bottom info banner — taller to fit CTA
+        f"drawbox=x=0:y={H-340}:w={W}:h=340:color=black@0.65:t=fill,"
         # Product title
-        f"drawtext=text='{esc(title)}':x=20:y={H-280}"
+        f"drawtext=text='{esc(title)}':x=20:y={H-318}"
         f":fontsize=36:fontcolor=white:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         f":borderw=1:bordercolor=black@0.8,"
         # Price
-        f"drawtext=text='{esc(price)}':x=20:y={H-170}"
+        f"drawtext=text='{esc(price)}':x=20:y={H-215}"
         f":fontsize=52:fontcolor=#FFD700:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         f":borderw=2:bordercolor=black@0.8,"
-        # Stars + rating
-        f"drawtext=text='{esc(stars)} {esc(str(rating))}/5':x=20:y={H-95}"
+        # Stars
+        f"drawtext=text='{esc(stars)} {esc(str(rating))}/5':x=20:y={H-138}"
         f":fontsize=38:fontcolor=#FFD700:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        f":borderw=1:bordercolor=black@0.8,"
+        # Link CTA
+        f"drawtext=text='Link in Description':x=20:y={H-68}"
+        f":fontsize=36:fontcolor=white:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
         f":borderw=1:bordercolor=black@0.8"
     )
 

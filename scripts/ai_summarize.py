@@ -5,17 +5,42 @@ Produces a punchy voiceover script optimized for 30-60 second Shorts.
 Cost: ~$0.01-0.03 per video (gpt-4o-mini)
 """
 import logging
+import re
 from openai import OpenAI
 import config
+from scripts.url_shortener import shorten
 
 logger = logging.getLogger(__name__)
 client = OpenAI(api_key=config.OPENAI_API_KEY)
+
+
+def _clean_script(text: str) -> str:
+    """
+    Strip anything that shouldn't be spoken aloud:
+    - Markdown links: [text](url) → text
+    - Raw URLs (http/https)
+    - Stage directions in brackets/parens
+    """
+    # Convert markdown links to just the display text
+    text = re.sub(r'\[([^\]]+)\]\(https?://[^\)]+\)', r'\1', text)
+    # Remove bare URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Remove stage directions like (pause) or [music]
+    text = re.sub(r'\([^)]{1,40}\)', '', text)
+    text = re.sub(r'\[[^\]]{1,40}\]', '', text)
+    # Clean up extra spaces/newlines
+    text = re.sub(r'  +', ' ', text).strip()
+    return text
 
 SYSTEM_PROMPT = """You are a viral YouTube Shorts scriptwriter specializing in Amazon product reviews.
 Your scripts are energetic, punchy, and designed to hook viewers in the first 3 seconds.
 You always sound like an enthusiastic friend sharing a great find — never like an advertisement.
 Keep scripts between 120-160 words so TTS stays under 60 seconds.
-Always end with a call to action."""
+CRITICAL RULES:
+- NEVER include URLs, links, or web addresses in the script — not even shortened ones
+- NEVER use markdown formatting like [text](url) — plain text only
+- Always end with exactly: "Check the link in the description to grab yours!"
+- Write ONLY what will be spoken aloud"""
 
 SCRIPT_TEMPLATE = """Write a YouTube Shorts voiceover script for this Amazon product review video.
 
@@ -23,7 +48,6 @@ PRODUCT: {title}
 PRICE: {price}
 RATING: {rating}/5 stars ({review_count} reviews)
 CATEGORY: {category}
-AFFILIATE LINK: {affiliate_url}
 
 TOP CUSTOMER REVIEWS:
 {reviews_text}
@@ -32,13 +56,13 @@ REQUIREMENTS:
 - Hook in first sentence (grab attention immediately)
 - Mention the product name naturally
 - Summarize what customers LOVE about it
-- Mention 1-2 drawbacks honestly (builds trust)  
+- Mention 1-2 drawbacks honestly (builds trust)
 - Mention the price casually
-- End with: "Link in bio and description!"
+- End with EXACTLY: "Check the link in the description to grab yours!"
 - 120-160 words MAX
 - Conversational, energetic tone
-- NO hashtags in the script (add those separately)
-- Write ONLY the voiceover text, no stage directions
+- NO hashtags, NO URLs, NO markdown, NO stage directions
+- Plain spoken text only
 
 Script:"""
 
@@ -68,7 +92,7 @@ def generate_script(product: dict, reviews: list[dict], reviews_text: str) -> di
             max_tokens=400,
             temperature=0.8,
         )
-        script = response.choices[0].message.content.strip()
+        script = _clean_script(response.choices[0].message.content.strip())
         logger.info(f"Generated script ({len(script.split())} words)")
 
         # Generate metadata
@@ -124,22 +148,27 @@ HASHTAGS: [hashtags here]"""
         if "#Shorts" not in hashtags:
             hashtags.insert(0, "#Shorts")
 
-        # Append affiliate URL to description
+        # Shorten affiliate URL and append to description
         affiliate_url = product.get("affiliate_url", "")
-        if affiliate_url and affiliate_url not in description:
-            description += f"\n\n🛒 Shop here: {affiliate_url}"
+        if affiliate_url:
+            short_url = shorten(affiliate_url)
+            description += f"\n\n🛒 Grab it here: {short_url}"
 
         return {
             "title": title or f"🛒 {product['title'][:55]}",
             "description": description,
             "hashtags": hashtags,
+            "short_url": short_url if affiliate_url else affiliate_url,
         }
 
     except Exception as e:
         logger.warning(f"Metadata generation failed: {e}")
+        affiliate_url = product.get("affiliate_url", "")
+        short_url = shorten(affiliate_url) if affiliate_url else ""
         tags = ["#Shorts", "#AmazonFinds", "#ProductReview", f"#{product.get('category', 'Amazon')}"]
         return {
             "title": f"🛒 {product['title'][:55]}",
-            "description": f"Check out this amazing find!\n\n🛒 {product.get('affiliate_url', '')}",
+            "description": f"Check out this amazing find!\n\n🛒 Grab it here: {short_url or affiliate_url}",
             "hashtags": tags,
+            "short_url": short_url,
         }
