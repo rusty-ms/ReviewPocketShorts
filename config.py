@@ -56,10 +56,17 @@ def validate_config():
         "AMAZON_ACCESS_KEY": AMAZON_ACCESS_KEY,
         "AMAZON_SECRET_KEY": AMAZON_SECRET_KEY,
         "OPENAI_API_KEY": OPENAI_API_KEY,
-        "META_ACCESS_TOKEN": META_ACCESS_TOKEN,
-        "INSTAGRAM_ACCOUNT_ID": INSTAGRAM_ACCOUNT_ID,
     }
     missing = [k for k, v in required.items() if not v]
     if missing:
         raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
     return True
+
+
+def instagram_configured() -> bool:
+    """Returns True only if all Instagram/Meta keys are set."""
+    return all([
+        META_ACCESS_TOKEN and META_ACCESS_TOKEN != "FILL_ME_IN",
+        INSTAGRAM_ACCOUNT_ID and INSTAGRAM_ACCOUNT_ID != "FILL_ME_IN",
+        META_APP_ID and META_APP_ID != "FILL_ME_IN",
+    ])

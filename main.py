@@ -148,17 +148,20 @@ def run_pipeline(dry_run: bool = False) -> dict:
         logger.info(f"  ✓ YouTube: {yt_result['video_url']}")
 
         # ── Step 8: Post to Instagram ──────────────────────────────
-        logger.info("Step 8/8: Posting to Instagram Reels...")
-        caption_parts = [
-            script_data["description"],
-            " ".join(script_data["hashtags"]),
-        ]
-        ig_result = post_reel(
-            video_path=video_path,
-            caption="\n\n".join(filter(None, caption_parts)),
-        )
-        result["instagram_permalink"] = ig_result.get("permalink", "")
-        logger.info(f"  ✓ Instagram: {ig_result.get('permalink', ig_result.get('media_id'))}")
+        if config.instagram_configured():
+            logger.info("Step 8/8: Posting to Instagram Reels...")
+            caption_parts = [
+                script_data["description"],
+                " ".join(script_data["hashtags"]),
+            ]
+            ig_result = post_reel(
+                video_path=video_path,
+                caption="\n\n".join(filter(None, caption_parts)),
+            )
+            result["instagram_permalink"] = ig_result.get("permalink", "")
+            logger.info(f"  ✓ Instagram: {ig_result.get('permalink', ig_result.get('media_id'))}")
+        else:
+            logger.info("Step 8/8: Instagram not configured — skipping")
 
         # ── Mark product used ──────────────────────────────────────
         mark_used(product["asin"], product["title"], yt_result["video_url"])
