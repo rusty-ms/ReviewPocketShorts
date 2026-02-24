@@ -24,13 +24,15 @@ FPS = config.VIDEO_FPS    # 30
 
 
 def download_images(image_urls: list[str], temp_dir: str) -> list[str]:
-    """Download product images to temp dir. Returns list of local paths."""
+    """Download product images to temp dir. Falls back to placeholder if all fail."""
     os.makedirs(temp_dir, exist_ok=True)
     paths = []
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
     }
     for i, url in enumerate(image_urls[:6]):
+        if not url or url.startswith("PLACEHOLDER"):
+            continue
         dest = os.path.join(temp_dir, f"product_{i}.jpg")
         try:
             req = urllib.request.Request(url, headers=headers)
@@ -39,8 +41,39 @@ def download_images(image_urls: list[str], temp_dir: str) -> list[str]:
             paths.append(dest)
         except Exception as e:
             logger.warning(f"Failed to download image {i}: {e}")
+
+    # Fallback: generate a branded placeholder if nothing downloaded
+    if not paths:
+        logger.warning("No images downloaded — generating placeholder")
+        placeholder = _generate_placeholder(temp_dir)
+        if placeholder:
+            paths.append(placeholder)
+
     logger.info(f"Downloaded {len(paths)} product images")
     return paths
+
+
+def _generate_placeholder(temp_dir: str) -> str:
+    """Generate a simple branded placeholder image using FFmpeg."""
+    out = os.path.join(temp_dir, "placeholder.jpg")
+    try:
+        subprocess.run([
+            "ffmpeg", "-y",
+            "-f", "lavfi",
+            "-i", f"color=c=0x1a1a2e:size={W}x{H}:rate=1",
+            "-frames:v", "1",
+            "-vf", (
+                f"drawtext=text='Review Pocket Shorts':x=(w-text_w)/2:y=(h-text_h)/2-80"
+                f":fontsize=60:fontcolor=white:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,"
+                f"drawtext=text='🛒 Amazon Product Review':x=(w-text_w)/2:y=(h-text_h)/2+20"
+                f":fontsize=40:fontcolor=#FFD700:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+            ),
+            out
+        ], capture_output=True, timeout=15)
+        return out if os.path.exists(out) else None
+    except Exception as e:
+        logger.warning(f"Placeholder generation failed: {e}")
+        return None
 
 
 def _get_audio_duration(audio_path: str) -> float:
