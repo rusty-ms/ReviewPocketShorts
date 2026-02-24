@@ -41,7 +41,13 @@ def _get_credentials() -> Credentials:
             flow = InstalledAppFlow.from_client_secrets_file(
                 config.YOUTUBE_CLIENT_SECRET_FILE, SCOPES
             )
-            creds = flow.run_local_server(port=0)
+            # Detect headless environment (no display) — use console flow
+            if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+                print("\n⚠️  Headless environment detected.")
+                print("Visit this URL in your browser to authorize YouTube access:\n")
+                creds = flow.run_console()
+            else:
+                creds = flow.run_local_server(port=0)
 
         with open(token_file, "wb") as f:
             pickle.dump(creds, f)
