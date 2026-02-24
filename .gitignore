@@ -1,0 +1,35 @@
+# Secrets - NEVER commit these
+.env
+client_secret.json
+youtube_token.json
+*.token
+*.pem
+*.key
+
+# Runtime data
+data/used_products.json
+temp/
+output/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

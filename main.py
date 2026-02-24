@@ -1,149 +1,193 @@
-# main.py
-import os
-os.environ["IMAGEMAGICK_BINARY"] = "/usr/bin/convert"
+"""
+main.py - ReviewPocketShorts Pipeline Orchestrator
+Runs the full daily pipeline:
+  1. Pick a fresh trending Amazon product
+  2. Scrape top customer reviews
+  3. Generate AI video script (GPT-4o-mini)
+  4. Generate TTS voiceover (edge-tts, free)
+  5. Download product images
+  6. Assemble vertical Short video (FFmpeg)
+  7. Upload to YouTube Shorts
+  8. Post to Instagram Reels
+  9. Mark product as used
 
-import time
+Run manually:  python main.py
+Run via n8n:   Triggered by n8n webhook or cron node (see n8n/workflow.json)
+"""
 import json
-import requests
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from moviepy.editor import AudioFileClip, ImageClip, CompositeVideoClip
+import logging
+import os
+import shutil
+import sys
+import traceback
 from datetime import datetime
-from TTS.api import TTS
+import config
+from scripts.amazon_products import pick_fresh_product
+from scripts.review_scraper import scrape_reviews, format_reviews_for_prompt
+from scripts.ai_summarize import generate_script
+from scripts.tts_generator import generate_voiceover
+from scripts.video_assembler import download_images, assemble_video
+from scripts.youtube_uploader import upload_short
+from scripts.instagram_poster import post_reel
+from scripts.product_tracker import mark_used
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-OUTPUT_DIR = "output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+# ── Logging Setup ──────────────────────────────────────────────────
+os.makedirs("logs", exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(f"logs/{datetime.now().strftime('%Y-%m-%d')}.log"),
+    ],
+)
+logger = logging.getLogger("main")
 
-# Load TTS model once
-tts_model = TTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=False)
 
-def authenticate_youtube():
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-    return build("youtube", "v3", credentials=creds)
+def cleanup_temp():
+    """Remove temp files from this run."""
+    if os.path.exists(config.TEMP_DIR):
+        shutil.rmtree(config.TEMP_DIR)
+        os.makedirs(config.TEMP_DIR, exist_ok=True)
 
-def get_trending_product():
-    cache_path = os.path.join(OUTPUT_DIR, "cached_amazon_response.json")
 
-    if os.getenv("USE_CACHE") == "1" and os.path.exists(cache_path):
-        print("Using cached Amazon data for testing.")
-        with open(cache_path, "r") as f:
-            cached = json.load(f)
-        return cached["title"], cached["link"], cached["img"]
+def run_pipeline(dry_run: bool = False) -> dict:
+    """
+    Execute the full ReviewPocketShorts pipeline.
+    Set dry_run=True to skip actual uploads (for testing).
+    Returns result dict with all produced URLs.
+    """
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    logger.info(f"=== ReviewPocketShorts Pipeline START (run_id={run_id}, dry_run={dry_run}) ===")
 
-    try:
-        api_key = os.getenv("RAPIDAPI_KEY")
-        if not api_key:
-            raise Exception("RAPIDAPI_KEY environment variable is missing.")
-
-        url = "https://real-time-amazon-data.p.rapidapi.com/bestsellers"
-        headers = {
-            "X-RapidAPI-Key": api_key,
-            "X-RapidAPI-Host": "real-time-amazon-data.p.rapidapi.com"
-        }
-        params = {"category_id": "aps", "country": "US"}
-
-        response = requests.get(url, headers=headers, params=params, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-
-        product = data["data"]["products"][0]
-        title = product["title"]
-        asin = product["asin"]
-        img = product["image"]
-        tag = os.getenv("AMAZON_AFFILIATE_TAG", "yourtag-20")
-        link = f"https://www.amazon.com/dp/{asin}?tag={tag}"
-
-        # Track ASINs to prevent repeats
-        seen_asins_path = os.path.join(OUTPUT_DIR, "seen_asins.txt")
-        if asin:
-            if os.path.exists(seen_asins_path):
-                with open(seen_asins_path, "r") as f:
-                    seen_asins = set(line.strip() for line in f)
-            else:
-                seen_asins = set()
-
-            if asin in seen_asins:
-                raise Exception("ASIN already used. Skipping.")
-
-            with open(seen_asins_path, "a") as f:
-                f.write(asin + "\n")
-
-        # Cache result
-        with open(cache_path, "w") as f:
-            json.dump({"title": title, "link": link, "img": img}, f)
-
-        return title, link, img
-    except Exception as e:
-        print("Failed to fetch from RapidAPI:", e)
-        raise
-
-def generate_voiceover(text, filepath):
-    print(f"Generating voiceover for: {text}")
-    tts_model.tts_to_file(text=text, file_path=filepath)
-    print(f"Voiceover saved to: {filepath}")
-
-def create_video(image_path, audio_path, output_path):
-    audio = AudioFileClip(audio_path)
-    clip = ImageClip(image_path).set_duration(audio.duration).set_audio(audio).set_fps(24)
-    final = CompositeVideoClip([clip], size=clip.size)
-    final.write_videofile(output_path, codec='libx264', audio_codec='aac')
-
-def upload_video_to_youtube(video_path, title, description):
-    youtube = authenticate_youtube()
-
-    body = {
-        "snippet": {
-            "title": title,
-            "description": description,
-            "tags": ["Amazon", "Review", "Trending"],
-            "categoryId": "22"
-        },
-        "status": {
-            "privacyStatus": "public",
-        }
+    result = {
+        "run_id": run_id,
+        "success": False,
+        "product": None,
+        "youtube_url": None,
+        "instagram_permalink": None,
+        "error": None,
     }
 
-    print(f"Uploading {video_path} to YouTube...")
-    request = youtube.videos().insert(
-        part=",".join(body.keys()),
-        body=body,
-        media_body=video_path
-    )
-    response = request.execute()
-    print("Upload complete.", json.dumps(response, indent=2))
+    try:
+        # ── Validate config ────────────────────────────────────────
+        config.validate_config()
 
-def main():
-    title, link, img = get_trending_product()
-    now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # ── Step 1: Pick a fresh product ───────────────────────────
+        logger.info("Step 1/8: Picking fresh Amazon product...")
+        product = pick_fresh_product()
+        if not product:
+            raise RuntimeError("No fresh products available — all categories exhausted")
 
-    image_file = f"{OUTPUT_DIR}/image_{now}.jpg"
-    audio_file = f"{OUTPUT_DIR}/audio_{now}.mp3"
-    video_file = f"{OUTPUT_DIR}/video_{now}.mp4"
-    description_file = f"{OUTPUT_DIR}/description_{now}.txt"
+        result["product"] = {
+            "asin": product["asin"],
+            "title": product["title"],
+            "price": product["price"],
+            "rating": product["rating"],
+            "affiliate_url": product["affiliate_url"],
+        }
+        logger.info(f"  ✓ Product: {product['title']} ({product['price']})")
 
-    # Download image
-    img_data = requests.get(img).content
-    with open(image_file, 'wb') as handler:
-        handler.write(img_data)
+        # ── Step 2: Scrape reviews ─────────────────────────────────
+        logger.info("Step 2/8: Scraping customer reviews...")
+        reviews = scrape_reviews(product["asin"], max_reviews=5)
+        reviews_text = format_reviews_for_prompt(reviews)
+        logger.info(f"  ✓ {len(reviews)} reviews collected")
 
-    # Generate voiceover
-    short_desc = f"🔥 Trending on Amazon: {title}!"
-    generate_voiceover(short_desc, audio_file)
+        # ── Step 3: Generate AI script ─────────────────────────────
+        logger.info("Step 3/8: Generating AI video script...")
+        script_data = generate_script(product, reviews, reviews_text)
+        logger.info(f"  ✓ Script ({len(script_data['script'].split())} words): {script_data['title']}")
 
-    # Save description
-    full_description = f"{short_desc}\n\n👉 Check it out here: {link}"
-    with open(description_file, "w") as f:
-        f.write(full_description)
+        # ── Step 4: Generate TTS voiceover ─────────────────────────
+        logger.info("Step 4/8: Generating TTS voiceover (free edge-tts)...")
+        audio_path = os.path.join(config.TEMP_DIR, f"voiceover_{run_id}.mp3")
+        generate_voiceover(script_data["script"], audio_path)
+        logger.info(f"  ✓ Audio: {audio_path}")
 
-    print(f"Description saved to: {description_file}")
+        # ── Step 5: Download product images ───────────────────────
+        logger.info("Step 5/8: Downloading product images...")
+        image_dir = os.path.join(config.TEMP_DIR, "images")
+        image_paths = download_images(product.get("images", []), image_dir)
+        if not image_paths:
+            raise RuntimeError("No product images could be downloaded")
+        logger.info(f"  ✓ {len(image_paths)} images downloaded")
 
-    # Create video
-    create_video(image_file, audio_file, video_file)
-    print(f"Moviepy - video ready {video_file}")
+        # ── Step 6: Assemble video ─────────────────────────────────
+        logger.info("Step 6/8: Assembling video with FFmpeg...")
+        video_filename = f"short_{run_id}_{product['asin']}.mp4"
+        video_path = os.path.join(config.VIDEO_OUTPUT_DIR, video_filename)
+        os.makedirs(config.VIDEO_OUTPUT_DIR, exist_ok=True)
 
-    # Upload to YouTube
-    upload_video_to_youtube(video_file, title, full_description)
+        background_music = os.path.join("assets", "background_music.mp3")
+        assemble_video(
+            image_paths=image_paths,
+            audio_path=audio_path,
+            output_path=video_path,
+            product=product,
+            script_data=script_data,
+            background_music=background_music if os.path.exists(background_music) else None,
+        )
+        logger.info(f"  ✓ Video: {video_path}")
+
+        if dry_run:
+            logger.info("DRY RUN — skipping uploads")
+            result["success"] = True
+            result["dry_run"] = True
+            return result
+
+        # ── Step 7: Upload to YouTube ──────────────────────────────
+        logger.info("Step 7/8: Uploading to YouTube Shorts...")
+        yt_result = upload_short(
+            video_path=video_path,
+            title=script_data["title"],
+            description=script_data["description"],
+            hashtags=script_data["hashtags"],
+        )
+        result["youtube_url"] = yt_result["video_url"]
+        logger.info(f"  ✓ YouTube: {yt_result['video_url']}")
+
+        # ── Step 8: Post to Instagram ──────────────────────────────
+        logger.info("Step 8/8: Posting to Instagram Reels...")
+        caption_parts = [
+            script_data["description"],
+            " ".join(script_data["hashtags"]),
+        ]
+        ig_result = post_reel(
+            video_path=video_path,
+            caption="\n\n".join(filter(None, caption_parts)),
+        )
+        result["instagram_permalink"] = ig_result.get("permalink", "")
+        logger.info(f"  ✓ Instagram: {ig_result.get('permalink', ig_result.get('media_id'))}")
+
+        # ── Mark product used ──────────────────────────────────────
+        mark_used(product["asin"], product["title"], yt_result["video_url"])
+
+        result["success"] = True
+        logger.info(f"=== Pipeline COMPLETE (run_id={run_id}) ===")
+        logger.info(f"  YouTube:   {result['youtube_url']}")
+        logger.info(f"  Instagram: {result['instagram_permalink']}")
+
+    except Exception as e:
+        result["error"] = str(e)
+        logger.error(f"Pipeline FAILED: {e}")
+        logger.error(traceback.format_exc())
+
+    finally:
+        cleanup_temp()
+
+    return result
+
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ReviewPocketShorts Pipeline")
+    parser.add_argument("--dry-run", action="store_true", help="Skip uploads, test pipeline only")
+    args = parser.parse_args()
+
+    result = run_pipeline(dry_run=args.dry_run)
+
+    # Output JSON result (n8n can parse this from stdout)
+    print(json.dumps(result, indent=2))
+    sys.exit(0 if result["success"] else 1)

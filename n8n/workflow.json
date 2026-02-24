@@ -1,0 +1,161 @@
+{
+  "name": "ReviewPocketShorts - Daily Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily 10am Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Runs every day at 10:00 AM server time. Adjust cron expression as needed."
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/ReviewPocketShorts && python main.py 2>&1"
+      },
+      "id": "run-pipeline",
+      "name": "Run Pipeline Script",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "notes": "Executes the full Python pipeline. Outputs JSON result to stdout."
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.stdout || '';\nconst lines = output.split('\\n');\n// Find the JSON result block (last {...} block in output)\nlet jsonStr = '';\nlet braceDepth = 0;\nlet capturing = false;\nfor (const line of lines) {\n  for (const ch of line) {\n    if (ch === '{') { braceDepth++; capturing = true; }\n    if (capturing) jsonStr += ch;\n    if (ch === '}') braceDepth--;\n    if (capturing && braceDepth === 0) break;\n  }\n  if (capturing) jsonStr += '\\n';\n  if (capturing && braceDepth === 0) break;\n}\ntry {\n  const result = JSON.parse(jsonStr);\n  return [{ json: result }];\n} catch(e) {\n  return [{ json: { success: false, error: 'Failed to parse pipeline output', raw: output } }];\n}"
+      },
+      "id": "parse-result",
+      "name": "Parse Pipeline Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "success-check",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-success",
+      "name": "Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconst product = result.product || {};\nconst lines = [\n  `✅ *ReviewPocketShorts posted!*`,\n  ``,\n  `📦 *${product.title || 'Product'}*`,\n  `💰 ${product.price || ''}  ⭐ ${product.rating || ''}/5`,\n  ``,\n  `🎬 YouTube: ${result.youtube_url || 'N/A'}`,\n  `📸 Instagram: ${result.instagram_permalink || 'N/A'}`,\n  ``,\n  `🛒 Affiliate: ${product.affiliate_url || 'N/A'}`,\n];\nreturn [{ json: { message: lines.join('\\n') } }];"
+      },
+      "id": "format-success-msg",
+      "name": "Format Success Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nreturn [{ json: { message: `❌ *ReviewPocketShorts pipeline FAILED*\\n\\nError: ${result.error || 'Unknown error'}\\n\\nCheck logs on the server.` } }];"
+      },
+      "id": "format-error-msg",
+      "name": "Format Error Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "telegramApi",
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "notify-success",
+      "name": "Notify Success (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 200],
+      "notes": "Configure your Telegram bot credentials in n8n. Set TELEGRAM_CHAT_ID in n8n variables."
+    },
+    {
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "telegramApi",
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "notify-error",
+      "name": "Notify Error (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1340, 400],
+      "notes": "Same bot, different message. You'll know immediately if something breaks."
+    }
+  ],
+  "connections": {
+    "Daily 10am Trigger": {
+      "main": [[{ "node": "Run Pipeline Script", "type": "main", "index": 0 }]]
+    },
+    "Run Pipeline Script": {
+      "main": [[{ "node": "Parse Pipeline Result", "type": "main", "index": 0 }]]
+    },
+    "Parse Pipeline Result": {
+      "main": [[{ "node": "Success?", "type": "main", "index": 0 }]]
+    },
+    "Success?": {
+      "main": [
+        [{ "node": "Format Success Message", "type": "main", "index": 0 }],
+        [{ "node": "Format Error Message", "type": "main", "index": 0 }]
+      ]
+    },
+    "Format Success Message": {
+      "main": [[{ "node": "Notify Success (Telegram)", "type": "main", "index": 0 }]]
+    },
+    "Format Error Message": {
+      "main": [[{ "node": "Notify Error (Telegram)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["review-pocket-shorts", "automation", "youtube", "instagram"],
+  "triggerCount": 1,
+  "updatedAt": "2026-02-24T00:00:00.000Z",
+  "versionId": "1"
+}
