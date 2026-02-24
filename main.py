@@ -30,6 +30,7 @@ from scripts.video_assembler import download_images, assemble_video
 from scripts.youtube_uploader import upload_short
 from scripts.instagram_poster import post_reel
 from scripts.product_tracker import mark_used
+from scripts.website_publisher import publish_to_website
 
 # ── Logging Setup ──────────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
@@ -65,6 +66,7 @@ def run_pipeline(dry_run: bool = False) -> dict:
         "success": False,
         "product": None,
         "youtube_url": None,
+        "website_url": None,
         "instagram_permalink": None,
         "error": None,
     }
@@ -147,6 +149,24 @@ def run_pipeline(dry_run: bool = False) -> dict:
         result["youtube_url"] = yt_result["video_url"]
         logger.info(f"  ✓ YouTube: {yt_result['video_url']}")
 
+        # ── Step 7b: Publish to website ────────────────────────────
+        logger.info("Step 7b: Publishing to ReviewPocketShorts website...")
+        try:
+            # Enrich product with image_url from script_data if available
+            product_for_web = {
+                **product,
+                "script_summary": script_data.get("script", "")[:200].split(".")[0] + ".",
+                "image_url": product.get("images", [""])[0] if product.get("images") else product.get("image_url", ""),
+            }
+            web_ok = publish_to_website(product_for_web, yt_result)
+            if web_ok:
+                result["website_url"] = f"https://rusty-ms.github.io/ReviewPocketShortsWeb/products/{product['asin']}.html"
+                logger.info(f"  ✓ Website: {result['website_url']}")
+            else:
+                logger.warning("  ⚠ Website publish failed (non-fatal) — pipeline continues")
+        except Exception as web_err:
+            logger.warning(f"  ⚠ Website publish error (non-fatal): {web_err}")
+
         # ── Step 8: Post to Instagram ──────────────────────────────
         if config.instagram_configured():
             logger.info("Step 8/8: Posting to Instagram Reels...")
@@ -170,6 +190,7 @@ def run_pipeline(dry_run: bool = False) -> dict:
         result["success"] = True
         logger.info(f"=== Pipeline COMPLETE (run_id={run_id}) ===")
         logger.info(f"  YouTube:   {result['youtube_url']}")
+        logger.info(f"  Website:   {result['website_url']}")
         logger.info(f"  Instagram: {result['instagram_permalink']}")
 
     except Exception as e:
