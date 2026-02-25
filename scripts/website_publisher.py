@@ -42,7 +42,7 @@ from pathlib import Path
 WEB_REPO_OWNER = "rusty-ms"
 WEB_REPO_NAME  = "ReviewPocketShortsWeb"
 WEB_REPO_DIR   = "/tmp/rps-web"
-SITE_BASE_URL  = "https://rusty-ms.github.io/ReviewPocketShortsWeb"
+SITE_BASE_URL  = "https://reviewpocketshorts.com"
 MAX_PRODUCTS   = 30
 AFFILIATE_TAG  = "reviewpockets-20"
 GITHUB_TOKEN   = os.getenv("GITHUB_TOKEN", "")
@@ -201,7 +201,7 @@ def update_products_json(product: dict, repo_dir: str) -> None:
         "image_url":     product.get("image_url", ""),
         "youtube_url":   product.get("youtube_url", ""),
         "youtube_id":    product.get("youtube_id", ""),
-        "page_url":      f"/ReviewPocketShortsWeb/products/{asin}.html",
+        "page_url":      f"/products/{asin}.html",
         "posted_at":     product.get("posted_at", datetime.now(timezone.utc).isoformat()),
         "script_summary": product.get("script_summary", ""),
     }
@@ -324,10 +324,10 @@ def publish_to_website(product: dict, youtube_result: dict | None = None) -> boo
 
         product = {**product, "youtube_url": yt_url, "youtube_id": yt_id}
 
-    # Use YouTube thumbnail as image fallback (always available, matches the channel's visual)
+    # Always use YouTube thumbnail on the website — it matches the channel's visuals
     yt_id = product.get("youtube_id", "")
-    if not product.get("image_url") and yt_id:
-        product = {**product, "image_url": f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"}
+    if yt_id:
+        product = {**product, "image_url": f"https://i.ytimg.com/vi/{yt_id}/maxresdefault.jpg"}
         logger.info(f"Using YouTube thumbnail as image: {product['image_url']}")
 
     if not product.get("youtube_id"):

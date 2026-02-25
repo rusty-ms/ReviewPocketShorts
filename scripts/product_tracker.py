@@ -13,10 +13,19 @@ logger = logging.getLogger(__name__)
 
 def _load() -> dict:
     os.makedirs(DATA_DIR, exist_ok=True)
+    default = {"used": [], "history": []}
     if not os.path.exists(USED_PRODUCTS_FILE):
-        return {"used": [], "history": []}
-    with open(USED_PRODUCTS_FILE, "r") as f:
-        return json.load(f)
+        return default
+    try:
+        with open(USED_PRODUCTS_FILE, "r") as f:
+            data = json.load(f)
+        # Ensure expected keys exist even if file was corrupted/empty
+        data.setdefault("used", [])
+        data.setdefault("history", [])
+        return data
+    except Exception:
+        logger.warning(f"Corrupted {USED_PRODUCTS_FILE} — resetting")
+        return default
 
 
 def _save(data: dict):
