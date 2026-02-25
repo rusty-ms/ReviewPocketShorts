@@ -67,20 +67,14 @@ def _authenticated_url() -> str:
 
 
 def clone_or_pull(dest: str) -> None:
-    """Clone the repo if it doesn't exist, otherwise pull latest."""
+    """Always fresh-clone — avoids stale state and merge conflicts."""
     auth_url = _authenticated_url()
-    safe_url = f"https://github.com/{WEB_REPO_OWNER}/{WEB_REPO_NAME}.git"  # for logging
-    if os.path.isdir(os.path.join(dest, ".git")):
-        logger.info(f"Pulling latest from {safe_url} → {dest}")
-        # Ensure remote uses authenticated URL
-        run(["git", "remote", "set-url", "origin", auth_url], cwd=dest)
-        run(["git", "pull", "--rebase"], cwd=dest)
-    else:
-        logger.info(f"Cloning {safe_url} → {dest}")
-        shutil.rmtree(dest, ignore_errors=True)
-        run(["git", "clone", auth_url, dest])
-        # Set identity for commits
-        run(["git", "config", "user.email", "friday@reviewpocketshorts.com"], cwd=dest)
+    safe_url = f"https://github.com/{WEB_REPO_OWNER}/{WEB_REPO_NAME}.git"
+    logger.info(f"Cloning {safe_url} → {dest}")
+    shutil.rmtree(dest, ignore_errors=True)
+    run(["git", "clone", auth_url, dest])
+    # Set identity for commits
+    run(["git", "config", "user.email", "friday@reviewpocketshorts.com"], cwd=dest)
         run(["git", "config", "user.name", "FRIDAY Pipeline"], cwd=dest)
 
 
