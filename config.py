@@ -14,6 +14,10 @@ AMAZON_PARTNER_TAG = os.getenv("AMAZON_PARTNER_TAG", "reviewpockets-20")
 AMAZON_HOST = os.getenv("AMAZON_HOST", "webservices.amazon.com")
 AMAZON_REGION = os.getenv("AMAZON_REGION", "us-east-1")
 
+# RapidAPI (fallback when PA API is not yet active)
+RAPIDAPI_KEY  = os.getenv("RAPIDAPI_KEY", "")
+RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
+
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

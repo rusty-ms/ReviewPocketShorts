@@ -103,14 +103,98 @@ def build_affiliate_url(asin: str) -> str:
     return f"https://www.amazon.com/dp/{asin}?tag={config.AMAZON_PARTNER_TAG}"
 
 
+def _rapidapi_products(category: str = None, max_results: int = 10) -> list[dict]:
+    """
+    Fetch products via RapidAPI (real-time-amazon-data).
+    Used as fallback when PA API is not yet active.
+    """
+    if not config.RAPIDAPI_KEY:
+        return []
+
+    if category is None:
+        category = random.choice(config.AMAZON_CATEGORIES)
+
+    headers = {
+        "X-RapidAPI-Key":  config.RAPIDAPI_KEY,
+        "X-RapidAPI-Host": config.RAPIDAPI_HOST,
+    }
+
+    # Step 1: Search for products
+    search_url = f"https://{config.RAPIDAPI_HOST}/search"
+    try:
+        resp = requests.get(search_url, headers=headers, params={
+            "query": f"best {category}",
+            "country": "US",
+            "page": 1,
+        }, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        items = (data.get("data") or {}).get("products") or data.get("products") or []
+    except Exception as e:
+        logger.error(f"RapidAPI search failed: {e}")
+        return []
+
+    # Collect fresh ASINs
+    asins = []
+    for item in items:
+        asin = item.get("asin") or item.get("ASIN") or item.get("id")
+        if asin and not is_used(asin):
+            asins.append(asin)
+    if not asins:
+        asins = [item.get("asin") or item.get("ASIN") for item in items if item.get("asin") or item.get("ASIN")]
+
+    if not asins:
+        logger.warning("RapidAPI returned no ASINs")
+        return []
+
+    # Step 2: Get details for one product
+    asin = random.choice(asins[:5])
+    details_url = f"https://{config.RAPIDAPI_HOST}/product-details"
+    try:
+        resp = requests.get(details_url, headers=headers, params={
+            "asin": asin, "country": "US",
+        }, timeout=15)
+        resp.raise_for_status()
+        d = (resp.json().get("data") or resp.json())
+
+        title  = d.get("product_title") or d.get("title") or "Amazon Product"
+        photos = d.get("product_photos") or d.get("images") or []
+        price  = d.get("product_price") or d.get("price") or "Check Amazon"
+        rating = d.get("product_star_rating") or d.get("rating") or "N/A"
+        review_count = d.get("product_num_ratings") or d.get("review_count") or 0
+
+        # Clean up price string
+        if isinstance(price, str):
+            price = price.split("–")[0].strip()
+
+        product = {
+            "asin":         asin,
+            "title":        title,
+            "images":       [p for p in photos if p and p.startswith("http")][:5],
+            "price":        price,
+            "rating":       rating,
+            "review_count": review_count,
+            "category":     category,
+            "affiliate_url": build_affiliate_url(asin),
+        }
+        logger.info(f"[RapidAPI] Found: {title} (ASIN: {asin}, {len(product['images'])} images)")
+        return [product]
+
+    except Exception as e:
+        logger.error(f"RapidAPI product details failed: {e}")
+        return []
+
+
 def search_bestsellers(category: str = None, max_results: int = 10) -> list[dict]:
     """
     Search Amazon for bestselling products in a category.
+    Priority: PA API → RapidAPI → mock data
     Returns list of product dicts with title, asin, images, price, rating, url.
     """
     if not config.AMAZON_ACCESS_KEY or not config.AMAZON_SECRET_KEY:
-        logger.warning("Amazon PA API keys not set — using mock data for testing")
-        return _mock_products()
+        logger.warning("Amazon PA API keys not set — trying RapidAPI...")
+        results = _rapidapi_products(category, max_results)
+        return results if results else _mock_products()
     
     if category is None:
         category = random.choice(config.AMAZON_CATEGORIES)
@@ -187,8 +271,9 @@ def search_bestsellers(category: str = None, max_results: int = 10) -> list[dict
         return products
         
     except Exception as e:
-        logger.error(f"Amazon PA API error: {e}")
-        return _mock_products()
+        logger.error(f"Amazon PA API error: {e} — trying RapidAPI fallback...")
+        results = _rapidapi_products(category, max_results)
+        return results if results else _mock_products()
 
 
 def pick_fresh_product(categories: list[str] = None) -> Optional[dict]:
