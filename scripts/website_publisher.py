@@ -330,6 +330,12 @@ def publish_to_website(product: dict, youtube_result: dict | None = None) -> boo
 
         product = {**product, "youtube_url": yt_url, "youtube_id": yt_id}
 
+    # Use YouTube thumbnail as image fallback (always available, matches the channel's visual)
+    yt_id = product.get("youtube_id", "")
+    if not product.get("image_url") and yt_id:
+        product = {**product, "image_url": f"https://i.ytimg.com/vi/{yt_id}/hqdefault.jpg"}
+        logger.info(f"Using YouTube thumbnail as image: {product['image_url']}")
+
     if not product.get("youtube_id"):
         logger.warning("No YouTube ID available — skipping website publish.")
         return False

@@ -221,42 +221,57 @@ def pick_fresh_product(categories: list[str] = None) -> Optional[dict]:
 def _mock_products() -> list[dict]:
     """
     Mock data for testing without PA API keys.
-    Used when Amazon PA API is unavailable or not yet activated.
+    Uses picsum.photos for reliable placeholder images (seeded by ASIN = consistent).
     NOTE: Mock products are flagged so deduplication is skipped.
     """
     products = [
         {
             "asin": "B08N5KWB9H",
             "title": "Echo Dot (4th Gen) | Smart speaker with Alexa",
-            "images": ["https://m.media-amazon.com/images/I/714Rq4k05UL._AC_SL1000_.jpg"],
+            "images": [
+                "https://picsum.photos/seed/B08N5KWB9H/800/800",
+                "https://picsum.photos/seed/B08N5KWB9H-2/800/800",
+            ],
             "price": "$49.99", "rating": 4.7, "review_count": 523847,
             "category": "Electronics",
         },
         {
             "asin": "B09B8YWXDF",
             "title": "Instant Pot Duo 7-in-1 Electric Pressure Cooker",
-            "images": ["https://m.media-amazon.com/images/I/71V1ThFHssL._AC_SL1500_.jpg"],
+            "images": [
+                "https://picsum.photos/seed/B09B8YWXDF/800/800",
+                "https://picsum.photos/seed/B09B8YWXDF-2/800/800",
+            ],
             "price": "$79.99", "rating": 4.8, "review_count": 145000,
             "category": "Kitchen",
         },
         {
             "asin": "B08DFPV5RP",
             "title": "Hydro Flask 32 oz Wide Mouth Water Bottle",
-            "images": ["https://m.media-amazon.com/images/I/51mRer3IDVL._AC_SL1500_.jpg"],
+            "images": [
+                "https://picsum.photos/seed/B08DFPV5RP/800/800",
+                "https://picsum.photos/seed/B08DFPV5RP-2/800/800",
+            ],
             "price": "$44.95", "rating": 4.8, "review_count": 89500,
             "category": "Sports",
         },
         {
             "asin": "B07PXGQC1Q",
             "title": "COSRX Advanced Snail 96 Mucin Power Essence",
-            "images": ["https://m.media-amazon.com/images/I/61OdG5TRrpL._AC_SL1000_.jpg"],
+            "images": [
+                "https://picsum.photos/seed/B07PXGQC1Q/800/800",
+                "https://picsum.photos/seed/B07PXGQC1Q-2/800/800",
+            ],
             "price": "$25.00", "rating": 4.5, "review_count": 67000,
             "category": "Beauty",
         },
         {
             "asin": "B07MQWQJBT",
             "title": "LEGO Classic Medium Creative Brick Box",
-            "images": ["https://m.media-amazon.com/images/I/91zMn8ueEML._AC_SL1500_.jpg"],
+            "images": [
+                "https://picsum.photos/seed/B07MQWQJBT/800/800",
+                "https://picsum.photos/seed/B07MQWQJBT-2/800/800",
+            ],
             "price": "$39.99", "rating": 4.8, "review_count": 43000,
             "category": "Toys",
         },
