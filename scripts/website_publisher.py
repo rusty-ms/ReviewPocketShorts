@@ -39,11 +39,13 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
-WEB_REPO_URL  = "https://github.com/rusty-ms/ReviewPocketShortsWeb.git"
-WEB_REPO_DIR  = "/tmp/rps-web"
-SITE_BASE_URL = "https://rusty-ms.github.io/ReviewPocketShortsWeb"
-MAX_PRODUCTS  = 30           # Keep only the most recent N products in products.json
-AFFILIATE_TAG = "reviewpockets-20"
+WEB_REPO_OWNER = "rusty-ms"
+WEB_REPO_NAME  = "ReviewPocketShortsWeb"
+WEB_REPO_DIR   = "/tmp/rps-web"
+SITE_BASE_URL  = "https://rusty-ms.github.io/ReviewPocketShortsWeb"
+MAX_PRODUCTS   = 30
+AFFILIATE_TAG  = "reviewpockets-20"
+GITHUB_TOKEN   = os.getenv("GITHUB_TOKEN", "")
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +58,30 @@ def run(cmd: list[str], cwd: str | None = None, check: bool = True) -> subproces
     return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
 
 
-def clone_or_pull(repo_url: str, dest: str) -> None:
+def _authenticated_url() -> str:
+    """Build an HTTPS remote URL with GitHub token embedded for auth."""
+    token = GITHUB_TOKEN
+    if token:
+        return f"https://{token}@github.com/{WEB_REPO_OWNER}/{WEB_REPO_NAME}.git"
+    return f"https://github.com/{WEB_REPO_OWNER}/{WEB_REPO_NAME}.git"
+
+
+def clone_or_pull(dest: str) -> None:
     """Clone the repo if it doesn't exist, otherwise pull latest."""
+    auth_url = _authenticated_url()
+    safe_url = f"https://github.com/{WEB_REPO_OWNER}/{WEB_REPO_NAME}.git"  # for logging
     if os.path.isdir(os.path.join(dest, ".git")):
-        logger.info(f"Pulling latest from {repo_url} → {dest}")
+        logger.info(f"Pulling latest from {safe_url} → {dest}")
+        # Ensure remote uses authenticated URL
+        run(["git", "remote", "set-url", "origin", auth_url], cwd=dest)
         run(["git", "pull", "--rebase"], cwd=dest)
     else:
-        logger.info(f"Cloning {repo_url} → {dest}")
+        logger.info(f"Cloning {safe_url} → {dest}")
         shutil.rmtree(dest, ignore_errors=True)
-        run(["git", "clone", repo_url, dest])
+        run(["git", "clone", auth_url, dest])
+        # Set identity for commits
+        run(["git", "config", "user.email", "friday@reviewpocketshorts.com"], cwd=dest)
+        run(["git", "config", "user.name", "FRIDAY Pipeline"], cwd=dest)
 
 
 def commit_and_push(repo_dir: str, message: str) -> None:
@@ -79,7 +96,8 @@ def commit_and_push(repo_dir: str, message: str) -> None:
 
     run(["git", "commit", "-m", message], cwd=repo_dir)
     logger.info("Pushing to GitHub...")
-    run(["git", "push"], cwd=repo_dir)
+    # Use authenticated URL for push
+    run(["git", "push", _authenticated_url(), "main"], cwd=repo_dir)
     logger.info("✅ Website pushed successfully.")
 
 
@@ -318,7 +336,7 @@ def publish_to_website(product: dict, youtube_result: dict | None = None) -> boo
 
     try:
         # Step 1: Clone or pull
-        clone_or_pull(WEB_REPO_URL, WEB_REPO_DIR)
+        clone_or_pull(WEB_REPO_DIR)
 
         # Step 2: Generate product HTML page
         generate_product_page(product, WEB_REPO_DIR)
