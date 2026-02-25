@@ -107,6 +107,11 @@ def _rapidapi_products(category: str = None, max_results: int = 10) -> list[dict
     """
     Fetch products via RapidAPI (real-time-amazon-data).
     Used as fallback when PA API is not yet active.
+
+    COST OPTIMIZED: single search call returns multiple products with thumbnail
+    images included. No per-product details calls — keeps usage at 1 API call
+    per pipeline run. A details call is only made if the chosen product has no
+    usable images from the search result.
     """
     if not config.RAPIDAPI_KEY:
         return []
@@ -119,11 +124,11 @@ def _rapidapi_products(category: str = None, max_results: int = 10) -> list[dict
         "X-RapidAPI-Host": config.RAPIDAPI_HOST,
     }
 
-    # Step 1: Search for products
+    # Single search call — returns title, price, rating, thumbnail per product
     search_url = f"https://{config.RAPIDAPI_HOST}/search"
     try:
         resp = requests.get(search_url, headers=headers, params={
-            "query": f"best {category}",
+            "query": f"best seller {category}",
             "country": "US",
             "page": 1,
         }, timeout=15)
@@ -134,55 +139,72 @@ def _rapidapi_products(category: str = None, max_results: int = 10) -> list[dict
         logger.error(f"RapidAPI search failed: {e}")
         return []
 
-    # Collect fresh ASINs
-    asins = []
-    for item in items:
-        asin = item.get("asin") or item.get("ASIN") or item.get("id")
-        if asin and not is_used(asin):
-            asins.append(asin)
-    if not asins:
-        asins = [item.get("asin") or item.get("ASIN") for item in items if item.get("asin") or item.get("ASIN")]
+    products = []
+    for item in items[:max_results]:
+        asin = item.get("asin") or item.get("ASIN") or ""
+        if not asin:
+            continue
 
-    if not asins:
-        logger.warning("RapidAPI returned no ASINs")
-        return []
+        title  = item.get("product_title") or item.get("title") or "Amazon Product"
+        price  = item.get("product_price") or item.get("price") or "Check Amazon"
+        rating = item.get("product_star_rating") or item.get("rating") or "N/A"
+        review_count = item.get("product_num_ratings") or item.get("review_count") or 0
+        thumbnail = item.get("product_photo") or item.get("thumbnail") or item.get("image") or ""
 
-    # Step 2: Get details for one product
-    asin = random.choice(asins[:5])
-    details_url = f"https://{config.RAPIDAPI_HOST}/product-details"
-    try:
-        resp = requests.get(details_url, headers=headers, params={
-            "asin": asin, "country": "US",
-        }, timeout=15)
-        resp.raise_for_status()
-        d = (resp.json().get("data") or resp.json())
-
-        title  = d.get("product_title") or d.get("title") or "Amazon Product"
-        photos = d.get("product_photos") or d.get("images") or []
-        price  = d.get("product_price") or d.get("price") or "Check Amazon"
-        rating = d.get("product_star_rating") or d.get("rating") or "N/A"
-        review_count = d.get("product_num_ratings") or d.get("review_count") or 0
-
-        # Clean up price string
+        # Clean price string (e.g. "$19.99 – $24.99" → "$19.99")
         if isinstance(price, str):
-            price = price.split("–")[0].strip()
+            price = price.split("–")[0].split("-")[0].strip()
 
-        product = {
-            "asin":         asin,
-            "title":        title,
-            "images":       [p for p in photos if p and p.startswith("http")][:5],
-            "price":        price,
-            "rating":       rating,
-            "review_count": review_count,
-            "category":     category,
+        images = [thumbnail] if thumbnail and thumbnail.startswith("http") else []
+
+        products.append({
+            "asin":          asin,
+            "title":         title,
+            "images":        images,
+            "price":         price,
+            "rating":        rating,
+            "review_count":  review_count,
+            "category":      category,
             "affiliate_url": build_affiliate_url(asin),
-        }
-        logger.info(f"[RapidAPI] Found: {title} (ASIN: {asin}, {len(product['images'])} images)")
-        return [product]
+            "_rapidapi":     True,  # Flag — details not fetched yet
+        })
 
+    logger.info(f"[RapidAPI] Search returned {len(products)} products for '{category}' (1 API call)")
+    return products
+
+
+def _rapidapi_fetch_details(asin: str, product: dict) -> dict:
+    """
+    Fetch full product photos for a chosen product.
+    Only called ONCE per pipeline run after a product is selected.
+    Cost: 1 additional API call.
+    """
+    if not config.RAPIDAPI_KEY:
+        return product
+
+    headers = {
+        "X-RapidAPI-Key":  config.RAPIDAPI_KEY,
+        "X-RapidAPI-Host": config.RAPIDAPI_HOST,
+    }
+    try:
+        resp = requests.get(
+            f"https://{config.RAPIDAPI_HOST}/product-details",
+            headers=headers,
+            params={"asin": asin, "country": "US"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        d = resp.json().get("data") or resp.json()
+
+        photos = d.get("product_photos") or d.get("images") or []
+        images = [p for p in photos if p and p.startswith("http")][:5]
+        if images:
+            product = {**product, "images": images}
+            logger.info(f"[RapidAPI] Fetched {len(images)} full images for {asin} (1 API call)")
     except Exception as e:
-        logger.error(f"RapidAPI product details failed: {e}")
-        return []
+        logger.warning(f"[RapidAPI] Details fetch failed (non-fatal): {e}")
+
+    return product
 
 
 def search_bestsellers(category: str = None, max_results: int = 10) -> list[dict]:
@@ -279,28 +301,57 @@ def search_bestsellers(category: str = None, max_results: int = 10) -> list[dict
 def pick_fresh_product(categories: list[str] = None) -> Optional[dict]:
     """
     Pick a product we haven't used yet.
-    Tries each category until it finds a fresh one.
+
+    PA API active  → loop categories, up to N PA API calls
+    RapidAPI mode  → 1 search call + 1 details call max (cost-optimized)
+    Mock fallback  → no API calls
     """
-    cats = categories or config.AMAZON_CATEGORIES
+    cats = list(categories or config.AMAZON_CATEGORIES)
     random.shuffle(cats)
-    
+
+    pa_api_active = bool(config.AMAZON_ACCESS_KEY and config.AMAZON_SECRET_KEY)
+
+    # ── RapidAPI path (cost-optimized: 2 calls max) ───────────────────────────
+    if not pa_api_active and config.RAPIDAPI_KEY:
+        category = cats[0]  # Single search — one category, one call
+        products = _rapidapi_products(category)
+        if not products:
+            logger.warning("[RapidAPI] No products returned — falling back to mock")
+            return random.choice(_mock_products())
+
+        fresh = [p for p in products if not is_used(p["asin"])]
+        pool  = fresh if fresh else products  # reuse any if all used
+        product = random.choice(pool[:5])
+
+        # Fetch full images only for the chosen product (1 details call)
+        if not product.get("images"):
+            product = _rapidapi_fetch_details(product["asin"], product)
+        else:
+            # Have thumbnail from search — get high-res details (optional, 1 call)
+            product = _rapidapi_fetch_details(product["asin"], product)
+
+        logger.info(f"[RapidAPI] Selected: {product['title']} ({len(product.get('images', []))} images)")
+        return product
+
+    # ── PA API path (or mock fallback) ────────────────────────────────────────
     for category in cats:
         products = search_bestsellers(category)
-        # Skip deduplication for mock products (PA API not active yet)
+
         if products and products[0].get("_mock"):
             product = random.choice(products)
-            logger.info(f"[MOCK] Selected product: {product['title']} (PA API not active)")
+            logger.info(f"[MOCK] Selected: {product['title']}")
             return product
-        # Filter out already-used real products
+
         fresh = [p for p in products if not is_used(p["asin"])]
         if fresh:
             product = random.choice(fresh)
-            logger.info(f"Selected fresh product: {product['title']} (ASIN: {product['asin']})")
+            logger.info(f"Selected: {product['title']} (ASIN: {product['asin']})")
             return product
-        time.sleep(1)  # Rate limiting
 
-    logger.warning("No fresh products found — clearing history may be needed")
-    return None
+        time.sleep(1)
+
+    logger.warning("No fresh products found — falling back to mock")
+    return random.choice(_mock_products())
 
 
 def _mock_products() -> list[dict]:
