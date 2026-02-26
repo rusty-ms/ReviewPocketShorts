@@ -144,6 +144,29 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
 
+        if parsed.path == "/build-catalog":
+            if not self._auth():
+                self._send(401, {"error": "Unauthorized"})
+                return
+            def _build():
+                try:
+                    from scripts.catalog_builder import build_catalog
+                    catalog = build_catalog()
+                    logger.info(f"[webhook] Catalog built: {catalog['product_count']} products, {catalog['total_api_calls']} API calls")
+                except Exception as e:
+                    logger.error(f"[webhook] Catalog build failed: {e}")
+            threading.Thread(target=_build, daemon=True).start()
+            self._send(202, {"status": "accepted", "message": "Catalog build started."})
+            return
+
+        if parsed.path == "/catalog-status":
+            try:
+                from scripts.catalog_builder import catalog_status
+                self._send(200, catalog_status())
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
+
         if parsed.path != "/run":
             self._send(404, {"error": "Not found"})
             return

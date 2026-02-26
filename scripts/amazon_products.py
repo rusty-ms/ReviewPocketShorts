@@ -300,6 +300,27 @@ def search_bestsellers(category: str = None, max_results: int = 10) -> list[dict
 
 def pick_fresh_product(categories: list[str] = None) -> Optional[dict]:
     """
+    Pick a fresh product.
+    Priority: weekly catalog → live RapidAPI → mock fallback
+    """
+    # ── Try weekly catalog first (no API calls) ───────────────────────────────
+    try:
+        from scripts.catalog_builder import pick_from_catalog, catalog_status
+        status = catalog_status()
+        if status["unused"] > 0:
+            product = pick_from_catalog()
+            if product:
+                return product
+        else:
+            logger.warning("[pick_fresh_product] Catalog empty or exhausted — falling back to live API")
+    except Exception as e:
+        logger.warning(f"[pick_fresh_product] Catalog lookup failed: {e} — falling back to live API")
+
+    return _pick_fresh_live(categories)
+
+
+def _pick_fresh_live(categories: list[str] = None) -> Optional[dict]:
+    """
     Pick a product we haven't used yet.
 
     PA API active  → loop categories, up to N PA API calls

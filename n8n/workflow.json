@@ -7,17 +7,57 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 10 * * *"
+              "expression": "0 16 * * *"
             }
           ]
         }
       },
       "id": "cron-trigger",
-      "name": "Daily 10am Trigger",
+      "name": "Daily 10am CST Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [240, 300],
-      "notes": "Fires every day at 10:00 AM (server timezone). Adjust as needed."
+      "position": [
+        240,
+        300
+      ],
+      "notes": "Fires every day at 16:00 UTC = 10:00 AM CST."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://5.183.11.32:8080/rusty-alerts-e1856d11",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "\ud83c\udfac RPS Pipeline Starting"
+            },
+            {
+              "name": "Tags",
+              "value": "movie_camera"
+            },
+            {
+              "name": "Priority",
+              "value": "default"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "body": "ReviewPocketShorts daily pipeline triggered. Generating video...",
+        "options": {}
+      },
+      "id": "notify-start",
+      "name": "Notify Start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
@@ -40,8 +80,11 @@
       "name": "Trigger Pipeline",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [460, 300],
-      "notes": "Fires the webhook on the host. Returns 202 immediately — pipeline runs in background."
+      "position": [
+        680,
+        300
+      ],
+      "notes": "Fires the webhook server. Returns 202 immediately \u2014 pipeline runs in background."
     },
     {
       "parameters": {
@@ -52,8 +95,10 @@
       "name": "Wait 90s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [680, 300],
-      "notes": "Give the pipeline time to run (~45-60s typical). Adjust if needed."
+      "position": [
+        900,
+        300
+      ]
     },
     {
       "parameters": {
@@ -65,7 +110,10 @@
       "name": "Poll Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [900, 300]
+      "position": [
+        1100,
+        300
+      ]
     },
     {
       "parameters": {
@@ -93,8 +141,10 @@
       "name": "Still Running?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1100, 300],
-      "notes": "If still running, wait another 60s and poll again."
+      "position": [
+        1300,
+        300
+      ]
     },
     {
       "parameters": {
@@ -105,7 +155,10 @@
       "name": "Wait 60s More",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [1100, 160]
+      "position": [
+        1300,
+        160
+      ]
     },
     {
       "parameters": {
@@ -133,101 +186,461 @@
       "name": "Success?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1320, 300]
+      "position": [
+        1520,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json.last_result || {};\nconst p = r.product || {};\nconst lines = [\n  '✅ *ReviewPocketShorts posted!*',\n  '',\n  `📦 *${p.title || 'Unknown Product'}*`,\n  `💰 ${p.price || ''}   ⭐ ${p.rating || 'N/A'}/5`,\n  '',\n  `🎬 YouTube: ${r.youtube_url || 'N/A'}`,\n  `📸 Instagram: ${r.instagram_permalink || 'N/A'}`,\n  '',\n  `🛒 Affiliate: ${p.affiliate_url || 'N/A'}`,\n];\nreturn [{ json: { message: lines.join('\\n') } }];"
+        "jsCode": "const r = $input.first().json.last_result || {};\nconst p = r.product || {};\nconst lines = [\n  `\ud83d\udce6 ${p.title || 'Unknown Product'}`,\n  `\ud83d\udcb0 ${p.price || 'N/A'}   \u2b50 ${p.rating || 'N/A'}/5`,\n  `\ud83c\udfac ${r.youtube_url || 'N/A'}`,\n  `\ud83d\uded2 ${p.affiliate_url || 'N/A'}`,\n];\nreturn [{ json: { message: lines.join('\\n'), title: '\u2705 RPS Posted!', tags: 'white_check_mark', priority: 'default' } }];"
       },
       "id": "format-success",
       "name": "Format Success",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 200]
+      "position": [
+        1740,
+        180
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const r = $input.first().json.last_result || {};\nreturn [{ json: { message: `❌ *ReviewPocketShorts FAILED*\\n\\nError: ${r.error || 'Unknown'}\\n\\nCheck: /opt/ReviewPocketShorts/logs/` } }];"
+        "jsCode": "const r = $input.first().json.last_result || {};\nreturn [{ json: { message: `Error: ${r.error || 'Unknown error'}\\n\\nCheck: /opt/ReviewPocketShorts/logs/`, title: '\u274c RPS FAILED', tags: 'x,rotating_light', priority: 'high' } }];"
       },
       "id": "format-error",
       "name": "Format Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 400]
+      "position": [
+        1740,
+        420
+      ]
     },
     {
       "parameters": {
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "telegramApi",
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
-        "text": "={{ $json.message }}",
-        "additionalFields": {
-          "parse_mode": "Markdown"
-        }
+        "method": "POST",
+        "url": "http://5.183.11.32:8080/rusty-alerts-e1856d11",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "body": "={{ $json.message }}",
+        "options": {}
       },
       "id": "notify-success",
       "name": "Notify Success",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [1760, 200]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1960,
+        180
+      ]
     },
     {
       "parameters": {
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "telegramApi",
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "={{ $vars.TELEGRAM_CHAT_ID }}",
-        "text": "={{ $json.message }}",
-        "additionalFields": {
-          "parse_mode": "Markdown"
-        }
+        "method": "POST",
+        "url": "http://5.183.11.32:8080/rusty-alerts-e1856d11",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "body": "={{ $json.message }}",
+        "options": {}
       },
       "id": "notify-error",
       "name": "Notify Error",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [1760, 400]
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1960,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "catalog-weekly-trigger",
+      "name": "Weekly Catalog Build (Sunday Midnight)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        600
+      ],
+      "notes": "Fires every Sunday at 00:00 UTC. Rebuilds product catalog from RapidAPI."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://5.183.11.32:8080/rusty-alerts-e1856d11",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "\ud83d\udce6 RPS Catalog Rebuilding"
+            },
+            {
+              "name": "Tags",
+              "value": "package"
+            },
+            {
+              "name": "Priority",
+              "value": "low"
+            }
+          ]
+        },
+        "sendBody": true,
+        "body": "Weekly product catalog rebuild started (RapidAPI).",
+        "options": {}
+      },
+      "id": "catalog-notify-start",
+      "name": "Catalog Notify Start",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/build-catalog",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Webhook-Secret",
+              "value": "={{ .RPS_WEBHOOK_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "catalog-trigger-build",
+      "name": "Trigger Catalog Build",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        680,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 180,
+        "unit": "seconds"
+      },
+      "id": "catalog-wait",
+      "name": "Wait 3min for Catalog",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        900,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://127.0.0.1:8765/catalog-status",
+        "options": {}
+      },
+      "id": "catalog-status",
+      "name": "Get Catalog Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const s = $input.first().json;\nreturn [{ json: { message: `\ud83d\udce6 Catalog ready: ${s.unused} products queued (${s.days_remaining} days)\\nCategories: ${JSON.stringify(s.by_category)}\\nBuilt: ${s.built_at ? s.built_at.slice(0,10) : 'unknown'}`, title: '\u2705 RPS Catalog Built', tags: 'white_check_mark', priority: 'default' } }];"
+      },
+      "id": "catalog-format-result",
+      "name": "Format Catalog Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://5.183.11.32:8080/rusty-alerts-e1856d11",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Tags",
+              "value": "={{ $json.tags }}"
+            },
+            {
+              "name": "Priority",
+              "value": "={{ $json.priority }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "body": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "catalog-notify-done",
+      "name": "Catalog Notify Done",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1520,
+        600
+      ]
     }
   ],
   "connections": {
-    "Daily 10am Trigger": {
-      "main": [[{ "node": "Trigger Pipeline", "type": "main", "index": 0 }]]
+    "Daily 10am CST Trigger": {
+      "main": [
+        [
+          {
+            "node": "Notify Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Start": {
+      "main": [
+        [
+          {
+            "node": "Trigger Pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Trigger Pipeline": {
-      "main": [[{ "node": "Wait 90s", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Wait 90s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Wait 90s": {
-      "main": [[{ "node": "Poll Status", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Poll Status": {
-      "main": [[{ "node": "Still Running?", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Still Running?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Still Running?": {
       "main": [
-        [{ "node": "Wait 60s More", "type": "main", "index": 0 }],
-        [{ "node": "Success?", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Wait 60s More",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Wait 60s More": {
-      "main": [[{ "node": "Poll Status", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Poll Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Success?": {
       "main": [
-        [{ "node": "Format Success", "type": "main", "index": 0 }],
-        [{ "node": "Format Error", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Format Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Format Success": {
-      "main": [[{ "node": "Notify Success", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Notify Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Format Error": {
-      "main": [[{ "node": "Notify Error", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Notify Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Catalog Build (Sunday Midnight)": {
+      "main": [
+        [
+          {
+            "node": "Catalog Notify Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Catalog Notify Start": {
+      "main": [
+        [
+          {
+            "node": "Trigger Catalog Build",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Catalog Build": {
+      "main": [
+        [
+          {
+            "node": "Wait 3min for Catalog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 3min for Catalog": {
+      "main": [
+        [
+          {
+            "node": "Get Catalog Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Catalog Status": {
+      "main": [
+        [
+          {
+            "node": "Format Catalog Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Catalog Result": {
+      "main": [
+        [
+          {
+            "node": "Catalog Notify Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
-  "settings": { "executionOrder": "v1" },
-  "tags": ["review-pocket-shorts", "automation"],
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    "review-pocket-shorts",
+    "automation"
+  ],
   "triggerCount": 1
 }
