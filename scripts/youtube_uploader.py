@@ -17,7 +17,10 @@ import config
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.force-ssl",  # Required for comments
+]
 
 
 def _get_credentials() -> Credentials:
@@ -137,4 +140,68 @@ def upload_short(
         except Exception as e:
             logger.warning(f"Thumbnail upload failed (may need channel verification): {e}")
 
+    # Post and pin affiliate link comment
+    if video_id:
+        _post_pinned_comment(youtube, video_id, description)
+
     return {"video_id": video_id, "video_url": video_url}
+
+
+def _post_pinned_comment(youtube, video_id: str, description: str):
+    """
+    Post the affiliate link as a pinned comment so it's immediately visible on Shorts.
+    Extracts the amzn.to / bit.ly link from the description.
+    """
+    try:
+        # Extract the short link from description (line starting with 🛒)
+        short_url = None
+        for line in description.split("\n"):
+            line = line.strip()
+            if line.startswith("🛒"):
+                short_url = line.replace("🛒", "").strip()
+                break
+
+        if not short_url:
+            logger.warning("No affiliate link found in description — skipping pinned comment")
+            return
+
+        comment_text = f"🛒 Grab it here → {short_url}\n\n👆 Tap the link above to shop on Amazon!"
+
+        # Post the comment
+        comment_response = youtube.commentThreads().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {"textOriginal": comment_text}
+                    }
+                }
+            }
+        ).execute()
+
+        comment_id = comment_response["snippet"]["topLevelComment"]["id"]
+        logger.info(f"Comment posted: {comment_id}")
+
+        # Pin the comment
+        youtube.comments().setModerationStatus(
+            id=comment_id,
+            moderationStatus="published",
+        ).execute()
+
+        # Mark as pinned via video update (channel owner can pin their own comment)
+        youtube.comments().update(
+            part="snippet",
+            body={
+                "id": comment_id,
+                "snippet": {
+                    "textOriginal": comment_text,
+                    "isPinned": True,
+                }
+            }
+        ).execute()
+
+        logger.info(f"✓ Pinned comment posted on {video_id}: {short_url}")
+
+    except Exception as e:
+        logger.warning(f"Pinned comment failed (non-fatal): {e}")
