@@ -320,6 +320,13 @@ ssh vps-n8n "cd /opt/ReviewPocketShorts && git pull && source venv/bin/activate 
 - Caused by a known formatting bug introduced during editing
 - Fix: review lines around `git config user.name` in `scripts/website_publisher.py`
 
+### Amazon PA API returning 404 (active issue as of 2026-02-26)
+- PA API endpoint `https://webservices.amazon.com/paapi5/searchitems` returning 404
+- Pipeline automatically falls back: PA API → RapidAPI → mock data
+- Not blocking but means real product data isn't being used
+- Check PA API credentials in `.env` — verify `AMAZON_ACCESS_KEY`, `AMAZON_SECRET_KEY`, `AMAZON_PARTNER_TAG`
+- May require active qualifying sales on the Associates account before API is fully enabled
+
 ### Amazon API returning empty results / 503
 - PA API requires active Associates account with qualifying sales
 - 503 on direct Amazon URLs is bot blocking — not an issue (pipeline uses PA API directly)
@@ -374,3 +381,5 @@ ssh vps-n8n "cd /opt/ReviewPocketShorts && git pull && source venv/bin/activate 
 | 2026-02-26 | Replaced cron job with n8n workflow (visual flow + ntfy notifications) |
 | 2026-02-26 | Updated n8n workflow: ntfy instead of Telegram, trigger time 16:00 UTC |
 | 2026-02-26 | Workflow imported to n8n and activated (ID: rps-daily-pipeline) |
+| 2026-02-26 | Dry run test passed ✅ — full pipeline clean, video assembled (1.7MB, 46s) |
+| 2026-02-26 | Known issue: Amazon PA API returning 404 — pipeline falls back to RapidAPI → mock |
