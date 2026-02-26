@@ -18,6 +18,9 @@ AMAZON_REGION = os.getenv("AMAZON_REGION", "us-east-1")
 RAPIDAPI_KEY  = os.getenv("RAPIDAPI_KEY", "")
 RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "real-time-amazon-data.p.rapidapi.com")
 
+# --- Bitly ---
+BITLY_ACCESS_TOKEN = os.getenv("BITLY_ACCESS_TOKEN", "")
+
 # OpenAI
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

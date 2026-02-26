@@ -111,11 +111,10 @@ def _generate_metadata(product: dict, script: str) -> dict:
     """Generate YouTube/Instagram title, description, and hashtags."""
     title_prompt = f"""For this YouTube Shorts video about "{product['title']}", generate:
 1. A catchy video title (max 60 chars, include an emoji)
-2. A video description (2-3 sentences + affiliate link + hashtags)
+2. A video description (2-3 engaging sentences about the product — no URLs, no hashtags, just the hook)
 3. 10 relevant hashtags (comma separated, include #Shorts #AmazonFinds)
 
 Product price: {product.get('price', '')}
-Affiliate URL: {product.get('affiliate_url', '')}
 
 Format your response as:
 TITLE: [title here]
@@ -148,17 +147,17 @@ HASHTAGS: [hashtags here]"""
         if "#Shorts" not in hashtags:
             hashtags.insert(0, "#Shorts")
 
-        # Shorten affiliate URL and append to description
+        # Build clean description: hook text + Bitly link + hashtags
         affiliate_url = product.get("affiliate_url", "")
-        if affiliate_url:
-            short_url = shorten(affiliate_url)
-            description += f"\n\n🛒 Grab it here: {short_url}"
+        short_url = shorten(affiliate_url) if affiliate_url else affiliate_url
+        hashtag_str = " ".join(hashtags)
+        full_description = f"{description}\n\n🛒 {short_url}\n\n{hashtag_str}"
 
         return {
             "title": title or f"🛒 {product['title'][:55]}",
-            "description": description,
+            "description": full_description,
             "hashtags": hashtags,
-            "short_url": short_url if affiliate_url else affiliate_url,
+            "short_url": short_url,
         }
 
     except Exception as e:
@@ -166,9 +165,10 @@ HASHTAGS: [hashtags here]"""
         affiliate_url = product.get("affiliate_url", "")
         short_url = shorten(affiliate_url) if affiliate_url else ""
         tags = ["#Shorts", "#AmazonFinds", "#ProductReview", f"#{product.get('category', 'Amazon')}"]
+        hashtag_str = " ".join(tags)
         return {
             "title": f"🛒 {product['title'][:55]}",
-            "description": f"Check out this amazing find!\n\n🛒 Grab it here: {short_url or affiliate_url}",
+            "description": f"Check out this amazing find!\n\n🛒 {short_url or affiliate_url}\n\n{hashtag_str}",
             "hashtags": tags,
             "short_url": short_url,
         }
