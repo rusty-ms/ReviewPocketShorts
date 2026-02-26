@@ -69,7 +69,14 @@ External services:
 ## Daily Pipeline Flow
 
 ```
-n8n (16:00 UTC / 10:00 AM CST)
+n8n (Sunday 00:00 UTC — weekly)
+  └── POST /build-catalog → catalog_builder.py
+        ├── RapidAPI search × 5 categories (7 products each = 35 total)
+        ├── RapidAPI product-details per product (high-res images)
+        └── Saves to data/product_catalog.json (~5 weeks of daily videos)
+        └── ntfy: "📦 Catalog Built: X products queued"
+
+n8n (16:00 UTC / 10:00 AM CST — daily)
   │
   ├── ntfy: "🎬 RPS Pipeline Starting"
   │
@@ -77,21 +84,34 @@ n8n (16:00 UTC / 10:00 AM CST)
   │     │
   │     └── main.py (background process)
   │           │
-  │           ├── Step 1: Pick fresh Amazon product (PA API → RapidAPI fallback → mock)
+  │           ├── Step 1: Pick from weekly catalog (no API call) → fallback live RapidAPI → mock
   │           ├── Step 2: Scrape top 5 customer reviews
-  │           ├── Step 3: GPT-4o-mini generates 45s script + title + hashtags
-  │           ├── Step 4: edge-tts generates MP3 voiceover (FREE)
-  │           ├── Step 5: Download product images
-  │           ├── Step 6: FFmpeg assembles 9:16 vertical MP4 (1080x1920)
-  │           ├── Step 7: Upload to YouTube Shorts
-  │           ├── Step 7b: Publish product page to GitHub Pages website
-  │           ├── Step 8: Post to Instagram Reels (skipped if not configured)
+  │           ├── Step 3: GPT-4o-mini generates 45s script + title + description
+  │           ├── Step 4: Bitly shortens affiliate URL → amzn.to/xxxxx
+  │           ├── Step 5: edge-tts generates MP3 voiceover (FREE)
+  │           ├── Step 6: Download product images
+  │           ├── Step 7: FFmpeg assembles 9:16 vertical MP4 (1080x1920)
+  │           ├── Step 8: Upload to YouTube Shorts
+  │           ├── Step 8b: Post pinned comment with amzn.to link
+  │           ├── Step 8c: Publish product page to GitHub Pages website
+  │           ├── Step 9: Post to Instagram Reels (skipped if not configured)
   │           └── mark_used() — prevents ASIN from being reused
   │
   ├── n8n polls /status every 90s until complete
   │
   └── ntfy: "✅ RPS Posted!" or "❌ RPS FAILED"
 ```
+
+### YouTube Description Format
+```
+[2-3 sentence product hook written by GPT-4o-mini]
+
+🛒 https://amzn.to/xxxxx
+
+#Shorts #AmazonFinds #[Category] ...
+```
+- Link is automatically clickable in YouTube descriptions
+- Pinned comment repeats the link for Shorts visibility (tappable at top of comments)
 
 ---
 
@@ -206,6 +226,7 @@ ssh vps-n8n "docker cp /tmp/rps-workflow.json root-n8n-1:/tmp/ && \
 | `YOUTUBE_CHANNEL_ID` | `ReviewPocketShorts` |
 | `WEBHOOK_SECRET` | Shared secret for webhook auth (secret) |
 | `RPS_WEBHOOK_SECRET` | Same secret, used in n8n env (secret) |
+| `BITLY_ACCESS_TOKEN` | Bitly API token for `amzn.to` branded short links (secret) |
 | `META_APP_ID` | Facebook app ID (not yet configured) |
 | `INSTAGRAM_ACCOUNT_ID` | Instagram account ID (not yet configured) |
 | `VIDEO_OUTPUT_DIR` | `/opt/ReviewPocketShorts/output` |
@@ -293,10 +314,17 @@ ssh vps-n8n "tail -f /opt/ReviewPocketShorts/logs/$(date +%Y-%m-%d).log"
 ssh vps-n8n "tail -50 /opt/ReviewPocketShorts/logs/webhook.log"
 ```
 
-### Re-auth YouTube (if token expires)
+### Re-auth YouTube (if token expires or new scopes added)
 ```bash
-ssh vps-n8n "cd /opt/ReviewPocketShorts && source venv/bin/activate && python authorize_youtube.py"
+ssh vps-n8n
+cd /opt/ReviewPocketShorts && source venv/bin/activate
+python authorize_youtube.py
 ```
+Open the URL it prints, authorize in browser, paste the code back. Token saved to `youtube_token.json`.
+
+> **Required scopes** (as of 2026-02-26):
+> - `youtube.upload` — video uploads
+> - `youtube.force-ssl` — posting + pinning comments
 
 ### Update Code from GitHub
 ```bash
@@ -319,6 +347,11 @@ ssh vps-n8n "cd /opt/ReviewPocketShorts && git pull && source venv/bin/activate 
 ### IndentationError in website_publisher.py
 - Caused by a known formatting bug introduced during editing
 - Fix: review lines around `git config user.name` in `scripts/website_publisher.py`
+
+### Pinned comment not posting
+- Usually a scope issue — re-run `python authorize_youtube.py` to get a fresh token with `youtube.force-ssl`
+- Check log for `Pinned comment failed` — it's non-fatal so pipeline won't stop
+- YouTube may reject comment pinning on brand-new videos — try manually pinning in YouTube Studio if it fails
 
 ### Amazon PA API returning 404 (active issue as of 2026-02-26)
 - PA API endpoint `https://webservices.amazon.com/paapi5/searchitems` returning 404
@@ -367,6 +400,27 @@ ssh vps-n8n "cd /opt/ReviewPocketShorts && git pull && source venv/bin/activate 
 
 ---
 
+## SEO & AI Engine Optimization (AEO) — TODO
+
+Getting cited by ChatGPT, Perplexity, Claude, Google AI Overviews, etc. is as valuable as ranking on Google.
+
+### Traditional SEO
+- [ ] `sitemap.xml` — auto-generated, submitted to Google Search Console + Bing
+- [ ] `robots.txt` — allow all crawlers including AI bots
+- [ ] Meta tags — `<title>`, `<meta description>`, Open Graph, Twitter Card per page
+- [ ] Canonical URLs on every page
+- [ ] Fast load times (Cloudflare Pages CDN handles this)
+- [ ] Internal linking between product pages
+
+### AI Engine Optimization (AEO)
+- [ ] **`llms.txt`** — new standard file (like robots.txt for LLMs). Lists what the site is, what's on it, key pages. Helps ChatGPT/Claude/Perplexity index and cite the site. See: https://llmstxt.org
+- [ ] **JSON-LD structured data** — `Product`, `Review`, `AggregateRating` schema on every product page. This is what Google AI Overviews and ChatGPT Shopping pull from.
+- [ ] **FAQ sections** on product pages — AI engines love Q&A format content for citations
+- [ ] **Clear factual sentences** — write descriptions so an AI can lift a sentence and cite the page (e.g. "The KitchenAid Shears retail for $14.99 and have a 4.7-star rating on Amazon.")
+- [ ] **`sitemap.xml` submitted to Bing** — Bing powers many AI engines including Perplexity and Copilot
+- [ ] **Consistent NAP** — site name, URL, and description consistent everywhere (GitHub, Cloudflare, meta tags)
+- [ ] **Backlinks** — share product pages on Reddit (r/frugalmalefashion, etc.), social, YouTube descriptions
+
 ## Changelog
 
 | Date | Change |
@@ -383,3 +437,8 @@ ssh vps-n8n "cd /opt/ReviewPocketShorts && git pull && source venv/bin/activate 
 | 2026-02-26 | Workflow imported to n8n and activated (ID: rps-daily-pipeline) |
 | 2026-02-26 | Dry run test passed ✅ — full pipeline clean, video assembled (1.7MB, 46s) |
 | 2026-02-26 | Known issue: Amazon PA API returning 404 — pipeline falls back to RapidAPI → mock |
+| 2026-02-26 | feat: weekly product catalog builder — RapidAPI pulls Sunday midnight, daily pipeline picks from catalog (35 products, ~5 weeks buffer) |
+| 2026-02-26 | feat: Bitly link shortening — replaced TinyURL, `amzn.to` branded links with affiliate tag preserved |
+| 2026-02-26 | fix: clean description format — no brackets, no redundant affiliate line, one `🛒 amzn.to/xxx` link + hashtags |
+| 2026-02-26 | feat: pinned comment posted after each YouTube upload with affiliate link for Shorts visibility |
+| 2026-02-26 | ⚠️ YouTube token cleared — new OAuth scope added (youtube.force-ssl for comments). Re-auth required before next run: `python authorize_youtube.py` on vps-n8n |
