@@ -25,6 +25,20 @@ SCOPES = [
 
 def _get_credentials() -> Credentials:
     """Load or refresh OAuth2 credentials. Opens browser on first run."""
+    # Headless path (GitHub Actions / any CI): build credentials directly from
+    # a pre-generated refresh token, no browser or pickle file needed.
+    if config.youtube_headless_configured():
+        creds = Credentials(
+            token=None,
+            refresh_token=config.YOUTUBE_REFRESH_TOKEN,
+            client_id=config.YOUTUBE_CLIENT_ID,
+            client_secret=config.YOUTUBE_CLIENT_SECRET,
+            token_uri="https://oauth2.googleapis.com/token",
+            scopes=SCOPES,
+        )
+        creds.refresh(google.auth.transport.requests.Request())
+        return creds
+
     token_file = config.YOUTUBE_TOKEN_FILE
     creds = None
 

@@ -182,6 +182,31 @@ def _build_slideshow(prepared_images: list[str], audio_duration: float, out_path
     return video_duration
 
 
+def _overlay_avatar_pip(background_path: str, avatar_path: str, video_duration: float, out_path: str):
+    """
+    Composite the avatar clip as a picture-in-picture circle-ish box over the
+    product slideshow, bottom-left. Uses the avatar clip's own audio track
+    (it already contains our TTS voice, lip-synced by the avatar provider),
+    so the separately-generated voice.mp3 is NOT muxed again here.
+    """
+    pip_width = 460
+    _run_ffmpeg([
+        "-i", background_path,
+        "-i", avatar_path,
+        "-filter_complex", (
+            f"[1:v]scale={pip_width}:-1[pip];"
+            f"[0:v][pip]overlay=40:H-h-380[vout]"
+        ),
+        "-map", "[vout]",
+        "-map", "1:a",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-c:a", "aac", "-b:a", "192k",
+        "-t", str(video_duration),
+        "-shortest",
+        out_path,
+    ], "avatar_pip_overlay")
+
+
 def _add_text_overlay(input_path: str, output_path: str, product: dict):
     """
     Add text overlays to the video:
@@ -238,10 +263,17 @@ def assemble_video(
     product: dict,
     script_data: dict,
     background_music: str = None,
+    avatar_clip_path: str = None,
 ) -> str:
     """
     Full video assembly pipeline for YouTube Shorts (1080x1920, <60s).
     Returns path to the final video file.
+
+    If avatar_clip_path is provided (see scripts/avatar_generator.py), it's
+    composited as a picture-in-picture presenter over the product slideshow,
+    and its own audio track (already lip-synced to our voiceover) becomes the
+    video's audio — background_music is skipped in that case since HeyGen
+    doesn't currently support mixing in a second audio bed.
     """
     os.makedirs(config.TEMP_DIR, exist_ok=True)
     os.makedirs(config.VIDEO_OUTPUT_DIR, exist_ok=True)
@@ -249,7 +281,8 @@ def assemble_video(
     if not image_paths:
         raise ValueError("No images provided for video assembly")
 
-    audio_duration = _get_audio_duration(audio_path)
+    reference_audio = avatar_clip_path if (avatar_clip_path and os.path.exists(avatar_clip_path)) else audio_path
+    audio_duration = _get_audio_duration(reference_audio)
     if audio_duration <= 0:
         audio_duration = 45.0
 
@@ -268,33 +301,38 @@ def assemble_video(
     video_duration = _build_slideshow(prepared, audio_duration, slideshow_path)
     logger.info(f"  Slideshow built: {video_duration:.1f}s")
 
-    # Step 3: Mix audio
-    if background_music and os.path.exists(background_music):
-        mixed_audio = os.path.join(config.TEMP_DIR, "mixed_audio.aac")
-        _run_ffmpeg([
-            "-i", audio_path,
-            "-i", background_music,
-            "-filter_complex", "[0:a]volume=1.0[v];[1:a]volume=0.12[b];[v][b]amix=inputs=2:duration=first[out]",
-            "-map", "[out]", "-c:a", "aac", "-b:a", "192k",
-            "-t", str(video_duration),
-            mixed_audio
-        ], "mix_audio")
-        final_audio = mixed_audio
+    if avatar_clip_path and os.path.exists(avatar_clip_path):
+        # Step 3 (avatar path): composite presenter PIP, audio comes from the avatar clip
+        combined_path = os.path.join(config.TEMP_DIR, "combined.mp4")
+        _overlay_avatar_pip(slideshow_path, avatar_clip_path, video_duration, combined_path)
+        logger.info("  Avatar PIP composited over slideshow")
     else:
-        final_audio = audio_path
+        # Step 3 (no-avatar path): mix optional background music, mux with slideshow
+        if background_music and os.path.exists(background_music):
+            mixed_audio = os.path.join(config.TEMP_DIR, "mixed_audio.aac")
+            _run_ffmpeg([
+                "-i", audio_path,
+                "-i", background_music,
+                "-filter_complex", "[0:a]volume=1.0[v];[1:a]volume=0.12[b];[v][b]amix=inputs=2:duration=first[out]",
+                "-map", "[out]", "-c:a", "aac", "-b:a", "192k",
+                "-t", str(video_duration),
+                mixed_audio
+            ], "mix_audio")
+            final_audio = mixed_audio
+        else:
+            final_audio = audio_path
 
-    # Step 4: Combine video + audio
-    combined_path = os.path.join(config.TEMP_DIR, "combined.mp4")
-    _run_ffmpeg([
-        "-i", slideshow_path,
-        "-i", final_audio,
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
-        "-shortest", "-t", str(video_duration),
-        combined_path
-    ], "combine_av")
+        combined_path = os.path.join(config.TEMP_DIR, "combined.mp4")
+        _run_ffmpeg([
+            "-i", slideshow_path,
+            "-i", final_audio,
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-shortest", "-t", str(video_duration),
+            combined_path
+        ], "combine_av")
 
-    # Step 5: Add text overlays → final output
+    # Step 4: Add text overlays → final output
     _add_text_overlay(combined_path, output_path, product)
 
     size_mb = os.path.getsize(output_path) / 1024 / 1024

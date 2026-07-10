@@ -75,7 +75,7 @@ def clone_or_pull(dest: str) -> None:
     run(["git", "clone", auth_url, dest])
     # Set identity for commits
     run(["git", "config", "user.email", "friday@reviewpocketshorts.com"], cwd=dest)
-        run(["git", "config", "user.name", "FRIDAY Pipeline"], cwd=dest)
+    run(["git", "config", "user.name", "FRIDAY Pipeline"], cwd=dest)
 
 
 def commit_and_push(repo_dir: str, message: str) -> None:
@@ -117,6 +117,30 @@ def make_meta_description(title: str, price: str, summary: str) -> str:
     return base
 
 
+def make_media_embed(yt_id: str, image_url: str, title: str) -> str:
+    """
+    Return the HTML for the page's hero media slot:
+    a YouTube iframe if we have a video yet, otherwise the product image.
+    """
+    if yt_id:
+        return (
+            '<div class="yt-embed-wrap">\n'
+            '            <iframe\n'
+            f'              src="https://www.youtube.com/embed/{yt_id}?autoplay=0&rel=0&modestbranding=1"\n'
+            f'              title="{title} Review — Review Pocket Shorts"\n'
+            '              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"\n'
+            '              allowfullscreen\n'
+            '              loading="lazy"\n'
+            '            ></iframe>\n'
+            '          </div>'
+        )
+    return (
+        '<div class="yt-embed-wrap">\n'
+        f'            <img src="{image_url}" alt="{title}" loading="lazy" style="width:100%;height:100%;object-fit:cover;" />\n'
+        '          </div>'
+    )
+
+
 def generate_product_page(product: dict, repo_dir: str) -> str:
     """
     Generate products/{asin}.html from the example.html template.
@@ -134,13 +158,18 @@ def generate_product_page(product: dict, repo_dir: str) -> str:
     affiliate    = product.get("affiliate_url", f"https://www.amazon.com/dp/{asin}?tag={AFFILIATE_TAG}")
     image_url    = product.get("image_url", "")
     yt_id        = product.get("youtube_id", "")
-    yt_url       = product.get("youtube_url", f"https://www.youtube.com/shorts/{yt_id}")
+    yt_url       = product.get("youtube_url") or (f"https://www.youtube.com/shorts/{yt_id}" if yt_id else affiliate)
     summary      = product.get("script_summary", "")
     posted_at    = product.get("posted_at", datetime.now(timezone.utc).isoformat())
     posted_date  = posted_at[:10] if posted_at else str(date.today())
     canonical    = f"{SITE_BASE_URL}/products/{asin}.html"
     page_title   = make_seo_title(title)
     meta_desc    = make_meta_description(title, price, summary)
+    media_embed  = make_media_embed(yt_id, image_url, title)
+    watch_button = (
+        f'<a href="{yt_url}" target="_blank" rel="noopener" class="btn btn-yt">▶ Watch on YouTube</a>'
+        if yt_id else ""
+    )
 
     replacements = {
         "{{ASIN}}":            asin,
@@ -154,6 +183,8 @@ def generate_product_page(product: dict, repo_dir: str) -> str:
         "{{IMAGE_URL}}":       image_url,
         "{{YOUTUBE_ID}}":      yt_id,
         "{{YOUTUBE_URL}}":     yt_url,
+        "{{MEDIA_EMBED}}":     media_embed,
+        "{{WATCH_BUTTON}}":    watch_button,
         "{{SCRIPT_SUMMARY}}":  summary,
         "{{POSTED_DATE}}":     posted_date,
         "{{CANONICAL_URL}}":   canonical,
@@ -324,14 +355,18 @@ def publish_to_website(product: dict, youtube_result: dict | None = None) -> boo
 
         product = {**product, "youtube_url": yt_url, "youtube_id": yt_id}
 
-    # Always use YouTube thumbnail on the website — it matches the channel's visuals
+    # Prefer the YouTube thumbnail once a video exists — it matches the channel's visuals.
+    # Otherwise fall back to the product's own Amazon image so the page still publishes.
     yt_id = product.get("youtube_id", "")
     if yt_id:
         product = {**product, "image_url": f"https://i.ytimg.com/vi/{yt_id}/maxresdefault.jpg"}
         logger.info(f"Using YouTube thumbnail as image: {product['image_url']}")
+    elif not product.get("image_url"):
+        images = product.get("images") or []
+        product = {**product, "image_url": images[0] if images else ""}
 
-    if not product.get("youtube_id"):
-        logger.warning("No YouTube ID available — skipping website publish.")
+    if not product.get("asin"):
+        logger.warning("No ASIN on product — skipping website publish.")
         return False
 
     try:

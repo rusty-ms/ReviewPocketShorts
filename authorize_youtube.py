@@ -26,6 +26,9 @@ parser.add_argument("--out", default="youtube_token.json",
                     help="Where to save the token (default: youtube_token.json)")
 parser.add_argument("--headless", action="store_true",
                     help="Force manual URL flow (no browser required)")
+parser.add_argument("--print-refresh-token", action="store_true",
+                    help="After authorizing, print YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN "
+                         "for use as GitHub Actions secrets (CI has no browser or pickle file).")
 args = parser.parse_args()
 
 if not os.path.exists(args.secret):
@@ -62,3 +65,12 @@ with open(args.out, "wb") as f:
 print(f"\n✅ Token saved to: {args.out}")
 print("\nIf you ran this on your Mac, copy it to the VPS:")
 print(f"  scp {args.out} vps-n8n:/opt/ReviewPocketShorts/youtube_token.json")
+
+if args.print_refresh_token:
+    print("\n" + "=" * 60)
+    print("GitHub Actions secrets (Settings → Secrets and variables → Actions):")
+    print("=" * 60)
+    print(f"YOUTUBE_CLIENT_ID={creds.client_id}")
+    print(f"YOUTUBE_CLIENT_SECRET={creds.client_secret}")
+    print(f"YOUTUBE_REFRESH_TOKEN={creds.refresh_token}")
+    print("\n⚠️  Treat these as passwords — do not commit or paste them anywhere public.")

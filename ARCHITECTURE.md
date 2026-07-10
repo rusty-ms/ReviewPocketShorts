@@ -1,7 +1,25 @@
 # ReviewPocketShorts — Architecture & Operations Guide
 
-> **Last updated:** 2026-02-26  
+> **Last updated:** 2026-07-10  
 > **Maintainer:** Rusty (rusty-ms) + FRIDAY (AI assistant)
+
+---
+
+## ⚠️ Current production path: GitHub Actions, not the VPS/n8n pipeline below
+
+As of 2026-07-10, the pipeline that actually runs daily is
+**`.github/workflows/amazon_video_bot.yml` → `generate_video_from_api.py`**,
+on GitHub's own runners — not `main.py` via `webhook_server.py`/n8n on
+`vps-n8n`. The VPS is used for other things and is no longer the host for
+this pipeline. Most of this document (Server Setup, n8n Workflow, SSH
+aliases, `/opt/ReviewPocketShorts/...` paths) describes that earlier
+design and is kept for historical reference — see the **"GitHub Actions
+Pipeline"** section below for what's actually live, and the **"Manual
+setup required"** checklist for what still needs a human (you) to do.
+
+Hosting: **Cloudflare Pages** watching the `ReviewPocketShortsWeb` repo
+(not GitHub Pages — `CNAME`/`_config.yml` were leftover Jekyll/Pages
+artifacts and have been removed).
 
 ---
 
@@ -66,7 +84,63 @@ External services:
 
 ---
 
-## Daily Pipeline Flow
+## GitHub Actions Pipeline (current production path)
+
+**Workflow:** `.github/workflows/amazon_video_bot.yml`
+**Entry point:** `generate_video_from_api.py`
+**Schedule:** daily at 14:00 UTC (08:00 America/Chicago), plus manual `workflow_dispatch`
+
+```
+GitHub Actions (ubuntu-latest runner, fresh checkout every run)
+  │
+  ├── Step 1:  Pick a fresh product (PA API → RapidAPI → mock)
+  ├── Step 2:  Scrape real customer reviews (scripts/review_scraper.py)
+  ├── Step 3:  GPT-4o-mini generates script + title + description
+  ├── Step 4:  OpenAI TTS voiceover ("nova" — female voice)
+  ├── Step 5:  Download product images
+  ├── Step 6:  Generate AI avatar clip — if HEYGEN_API_KEY/HEYGEN_AVATAR_ID set
+  ├── Step 7:  FFmpeg assembles 9:16 video (avatar PIP overlay if Step 6 produced one)
+  ├── Step 8:  Upload to YouTube Shorts — if YOUTUBE_* secrets set
+  ├── Step 9:  Publish product page to ReviewPocketShortsWeb (Cloudflare Pages picks it up)
+  ├── Step 10: Post to Instagram Reels — if META_*/INSTAGRAM_* secrets set
+  ├── Step 11: Write metadata.txt / product.json artifacts (always, for manual fallback)
+  └── Step 12: Mark product used
+  │
+  └── "Commit dedup state" step pushes data/used_products.json back to the repo —
+      required because Actions runners are ephemeral and don't otherwise remember
+      which ASINs were already used.
+```
+
+Steps 6, 8, 10 are each independently gated on their own secrets being set and are
+non-fatal — a missing/failing integration just logs a warning, it doesn't fail the run.
+
+### Manual setup required (things only you can do — I can't create accounts or grant OAuth consent on your behalf)
+
+| # | Task | Why |
+|---|------|-----|
+| 1 | Run `python authorize_youtube.py --print-refresh-token` locally (needs your Google login in a browser) and add the three printed values as GitHub Actions secrets: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` | Without these, Step 8 (YouTube upload) is skipped every run |
+| 2 | Set up Meta Graph API access (Facebook Page + Professional Instagram account + Meta developer app) and add `META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN`, `INSTAGRAM_ACCOUNT_ID` as secrets | Without these, Step 10 (Instagram) is skipped every run |
+| 3 | Add `GH_PUBLISH_TOKEN` secret — a fine-grained PAT with Contents:write on `ReviewPocketShortsWeb` | Without it, Step 9 (website publish) can't push the generated page |
+| 4 | Sign up for HeyGen (or another avatar API), pick/create an avatar, add `HEYGEN_API_KEY` and `HEYGEN_AVATAR_ID` secrets | Without these, Step 6 is skipped and video stays a plain image slideshow (no presenter) |
+| 5 | Apply for Google AdSense on `reviewpocketshorts.com`; once approved, replace every `ca-pub-XXXXXXXXXXXXXXXX` placeholder in the website repo and uncomment the real line in `ads.txt` | Ad slots are already placed on the site but show nothing until this is done |
+| 6 | Confirm the Amazon PA API 404 issue (see Troubleshooting below) is actually resolved, or accept the RapidAPI/mock fallback | Affects whether "trending products" are real or fallback data |
+| 7 | The repo's own default `GITHUB_TOKEN` (auto-provided by Actions) now needs `contents: write` — already set in the workflow's `permissions:` block, nothing to do here, just noting it |
+
+None of the above existed before 2026-07-10 — this pipeline previously only rendered a
+video and threw it away as a 7-day build artifact.
+
+### Legacy VPS/n8n design (superseded, kept for reference)
+
+`main.py`, `webhook_server.py`, `reviewpocketshorts.service`, `n8n/`, and the
+interactive branch of `authorize_youtube.py` implement the same pipeline for the
+old VPS+n8n deployment. They're left in place (the VPS still runs other things)
+but are not part of the live pipeline — everything below this point that
+references `vps-n8n`, n8n, or `/opt/ReviewPocketShorts` describes that
+inactive design.
+
+---
+
+## Daily Pipeline Flow (legacy VPS/n8n design — not currently running)
 
 ```
 n8n (Sunday 00:00 UTC — weekly)
@@ -430,7 +504,7 @@ Getting cited by ChatGPT, Perplexity, Claude, Google AI Overviews, etc. is as va
 | 2026-02-25 | Added website_publisher.py — auto-publishes to GitHub Pages |
 | 2026-02-25 | Fixed product image handling (PA API → RapidAPI → mock fallback) |
 | 2026-02-25 | First successful full pipeline run — KitchenAid Shears (B07PZF3QS3) |
-| 2026-02-26 | Fixed IndentationError in website_publisher.py (git config user.name) |
+| 2026-02-26 | ~~Fixed IndentationError in website_publisher.py~~ — **this entry was inaccurate.** The fix was never actually committed; the bug shipped in every commit from `0c737c88` (2026-02-25) through 2026-07-09. Actually fixed 2026-07-10 (see below). |
 | 2026-02-26 | Cleared stale __pycache__ causing product_tracker KeyError |
 | 2026-02-26 | Replaced cron job with n8n workflow (visual flow + ntfy notifications) |
 | 2026-02-26 | Updated n8n workflow: ntfy instead of Telegram, trigger time 16:00 UTC |
@@ -442,3 +516,11 @@ Getting cited by ChatGPT, Perplexity, Claude, Google AI Overviews, etc. is as va
 | 2026-02-26 | fix: clean description format — no brackets, no redundant affiliate line, one `🛒 amzn.to/xxx` link + hashtags |
 | 2026-02-26 | feat: pinned comment posted after each YouTube upload with affiliate link for Shorts visibility |
 | 2026-02-26 | ⚠️ YouTube token cleared — new OAuth scope added (youtube.force-ssl for comments). Re-auth required before next run: `python authorize_youtube.py` on vps-n8n |
+| 2026-07-10 | fix: actually fixed the `IndentationError` in `website_publisher.py` (`clone_or_pull`) |
+| 2026-07-10 | fix: `publish_to_website` no longer requires a YouTube ID — website pages now publish even before/without a YouTube upload, using the product's own image as a fallback |
+| 2026-07-10 | feat: `generate_video_from_api.py` (the actual GitHub Actions entry point) now scrapes real reviews, uploads to YouTube, posts to Instagram, and publishes the website page — previously it only rendered a video and discarded it |
+| 2026-07-10 | feat: headless YouTube OAuth via refresh token (`YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN`) — works in GitHub Actions, which has no browser |
+| 2026-07-10 | fix: dedup state (`data/used_products.json`) is now committed back to the repo each run — it was gitignored, so on ephemeral GitHub Actions runners deduplication silently never worked |
+| 2026-07-10 | feat: AI avatar presenter scaffold (`scripts/avatar_generator.py`, HeyGen) + PIP compositing in `video_assembler.py` — inactive until `HEYGEN_API_KEY`/`HEYGEN_AVATAR_ID` are set; untested against a real HeyGen account |
+| 2026-07-10 | fix: corrected stale `rusty-ms.github.io` URLs to `reviewpocketshorts.com` across the website repo (index, product pages, robots.txt) |
+| 2026-07-10 | feat: ad slots added to website (index + product pages) — inert until a real AdSense publisher ID replaces the `ca-pub-XXXXXXXXXXXXXXXX` placeholders |

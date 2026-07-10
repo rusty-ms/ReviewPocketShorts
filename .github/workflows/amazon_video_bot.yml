@@ -6,6 +6,9 @@ on:
     # Runs every day at 14:00 UTC (08:00 America/Chicago)
     - cron: "0 14 * * *"
 
+permissions:
+  contents: write  # needed to commit dedup state (data/used_products.json) back to the repo
+
 jobs:
   build-and-render:
     runs-on: ubuntu-latest
@@ -19,13 +22,32 @@ jobs:
       AMAZON_HOST:        webservices.amazon.com
       AMAZON_REGION:      us-east-1
 
+      # ====== RapidAPI fallback (used if PA API isn't active) ======
+      RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+
       # ====== OpenAI (required for script + TTS) ======
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL:   gpt-4o-mini
       TTS_VOICE:      nova
 
-      # ====== GitHub (for website auto-publish) ======
+      # ====== GitHub (for website auto-publish to ReviewPocketShortsWeb) ======
       GITHUB_TOKEN: ${{ secrets.GH_PUBLISH_TOKEN }}
+
+      # ====== YouTube upload — headless refresh-token auth ======
+      # Generate once locally: python authorize_youtube.py --print-refresh-token
+      YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
+      # ====== Instagram Reels (Meta Graph API) ======
+      META_APP_ID:          ${{ secrets.META_APP_ID }}
+      META_APP_SECRET:      ${{ secrets.META_APP_SECRET }}
+      META_ACCESS_TOKEN:    ${{ secrets.META_ACCESS_TOKEN }}
+      INSTAGRAM_ACCOUNT_ID: ${{ secrets.INSTAGRAM_ACCOUNT_ID }}
+
+      # ====== AI avatar presenter (optional — see scripts/avatar_generator.py) ======
+      HEYGEN_API_KEY:   ${{ secrets.HEYGEN_API_KEY }}
+      HEYGEN_AVATAR_ID: ${{ secrets.HEYGEN_AVATAR_ID }}
 
       # ====== Product categories to rotate ======
       AMAZON_CATEGORIES: "Electronics,Beauty,Kitchen,Toys,Sports,Home"
@@ -47,7 +69,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow openai python-dotenv
+          pip install -r requirements.txt
 
       - name: Show environment
         run: |
@@ -68,6 +90,19 @@ jobs:
           echo ""
           echo "=== Metadata ==="
           cat output/metadata.txt 2>/dev/null || echo "No metadata file"
+
+      - name: Commit dedup state
+        if: always()
+        run: |
+          git config user.email "friday@reviewpocketshorts.com"
+          git config user.name "FRIDAY Pipeline"
+          git add data/used_products.json data/product_catalog.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update dedup state [skip ci]"
+            git push
+          else
+            echo "No dedup state changes to commit."
+          fi
 
       - name: Upload video artifact
         if: always()

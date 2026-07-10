@@ -7,7 +7,10 @@ youtube_token.json
 *.key
 
 # Runtime data
-data/used_products.json
+# NOTE: data/used_products.json and data/product_catalog.json are intentionally
+# NOT ignored — GitHub Actions runners are ephemeral (fresh checkout every run),
+# so dedup/catalog state must be committed back to the repo to persist at all.
+# See the "Commit dedup state" step in .github/workflows/amazon_video_bot.yml.
 temp/
 output/
 logs/
